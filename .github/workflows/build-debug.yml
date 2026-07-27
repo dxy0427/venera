@@ -18,13 +18,13 @@ jobs:
         with:
           distribution: 'oracle'
           java-version: '17'
-      - name: Create dummy signing config
+      - name: Create signing config
         run: |
+          keytool -genkey -v -keystore android/debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Debug,OU=Debug,O=Debug,L=Debug,ST=Debug,C=US"
           echo "storePassword=android" > android/key.properties
           echo "keyPassword=android" >> android/key.properties
           echo "keyAlias=androiddebugkey" >> android/key.properties
           echo "storeFile=debug.keystore" >> android/key.properties
-          cp ~/.android/debug.keystore android/debug.keystore
       - name: Check rust-toolchain.toml
         run: rustup show
       - run: flutter pub get
