@@ -79,9 +79,14 @@ class FavoriteItem implements Comic {
   @override
   String get description {
     var time = this.time.substring(0, 10);
+    final sourceName = type == ComicType.local
+        ? 'local'
+        : type == ComicType.webdav
+            ? 'WebDAV'
+            : type.comicSource?.name ?? "Unknown";
     return appdata.settings['comicDisplayMode'] == 'detailed'
-        ? "$time | ${type == ComicType.local ? 'local' : type.comicSource?.name ?? "Unknown"}"
-        : "${type.comicSource?.name ?? "Unknown"} | $time";
+        ? "$time | $sourceName"
+        : "$sourceName | $time";
   }
 
   @override
@@ -94,9 +99,7 @@ class FavoriteItem implements Comic {
   int? get maxPage => null;
 
   @override
-  String get sourceKey => type == ComicType.local
-      ? 'local'
-      : type.comicSource?.key ?? "Unknown:${type.value}";
+  String get sourceKey => type.sourceKey;
 
   @override
   double? get stars => null;

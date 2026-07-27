@@ -1,8 +1,10 @@
 import 'dart:async' show Future;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/images.dart';
+import 'package:venera/pages/webdav_comics/webdav_provider.dart';
 import 'package:venera/utils/io.dart';
 import '../history.dart';
 import 'base_image_provider.dart';
@@ -26,6 +28,12 @@ class HistoryImageProvider
       if (await file.exists()) {
         return file.readAsBytes();
       }
+    }
+    // WebDAV covers (remote path / stream / webdav://)
+    if (history.type == ComicType.webdav) {
+      checkStop();
+      final cover = url.isNotEmpty ? url : history.id;
+      return WebDavProvider().loadImage(cover);
     }
     if (!url.contains('/')) {
       var localComic = LocalManager().find(history.id, history.type);

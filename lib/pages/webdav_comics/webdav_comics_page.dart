@@ -503,6 +503,20 @@ class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
               ),
             )
           else ...[
+            // Cover
+            if (widget.comic.coverPath != null)
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 220,
+                  child: Image(
+                    image: WebDavImageProvider(widget.comic.coverPath!),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Center(
+                      child: Icon(Icons.broken_image, size: 48),
+                    ),
+                  ),
+                ),
+              ),
             // Metadata section
             if (info != null && !info.isEmpty) _buildMetadata(info),
             // Content
@@ -614,44 +628,71 @@ class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
     );
   }
 
-  Widget _buildChapterList() {
-    return SliverList(
-      delegate: SliverChildBuilderDelegate(
-        (context, index) {
-          final chapter = _chapters![index];
-          final isDownloading =
-              WebDavProvider().downloadingChapters.contains(chapter.path);
-          final progress = WebDavProvider().getDownloadProgress(chapter.path);
-          final isCached = WebDavProvider().isCbzCached(chapter.path);
+  History? get _history =>
+      HistoryManager().find(widget.comic.path, ComicType.webdav);
 
-          return ListTile(
-            leading: CircleAvatar(
-              child: isCached
-                  ? const Icon(Icons.check, size: 18)
-                  : Text('${index + 1}'),
+  Widget _buildChapterList() {
+    final history = _history;
+    return SliverMainAxisGroup(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      final ep = (history?.ep ?? 1).clamp(1, _chapters!.length);
+                      _openChapter(_chapters![ep - 1], ep - 1,
+                          initialPage: history != null && history.ep == ep
+                              ? (history.page - 1).clamp(0, 99999)
+                              : 0);
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: Text(
+                      history != null && history.ep > 0
+                          ? 'Continue'.tl
+                          : 'Start Reading'.tl,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            title: Text(chapter.name),
-            subtitle: isDownloading
-                ? LinearProgressIndicator(value: progress)
-                : Text(chapter.imageCount > 0
-                    ? '${chapter.imageCount} pages'
-                    : (isCached ? 'Cached' : 'CBZ')),
-            trailing: isDownloading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.chevron_right),
-            onTap: isDownloading ? null : () => _openChapter(chapter, index),
-          );
-        },
-        childCount: _chapters!.length,
-      ),
+          ),
+        ),
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final chapter = _chapters![index];
+              final isCurrent = history != null && history.ep == index + 1;
+              final isArchive = chapter.path.endsWith('.cbz') ||
+                  chapter.path.endsWith('.zip');
+
+              return ListTile(
+                selected: isCurrent,
+                leading: CircleAvatar(
+                  child: Text('${index + 1}'),
+                ),
+                title: Text(chapter.name),
+                subtitle: Text(
+                  chapter.imageCount > 0
+                      ? '${chapter.imageCount} pages'
+                      : (isArchive ? 'Stream'.tl : 'Online'.tl),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _openChapter(chapter, index),
+              );
+            },
+            childCount: _chapters!.length,
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildImageList() {
+    final history = _history;
     return SliverToBoxAdapter(
       child: Column(
         children: [
@@ -662,84 +703,42 @@ class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
           ),
           const SizedBox(height: 8),
           FilledButton.icon(
-            onPressed: () => _startReading(_images!, 0),
+            onPressed: () => _startReading(
+              _images!,
+              history != null ? (history.page - 1).clamp(0, _images!.length - 1) : 0,
+            ),
             icon: const Icon(Icons.play_arrow),
-            label: Text('Start Reading'.tl),
+            label: Text(
+              history != null && history.page > 1
+                  ? 'Continue'.tl
+                  : 'Start Reading'.tl,
+            ),
           ),
           const SizedBox(height: 16),
-          _buildThumbnailGrid(_images!),
+          // Do not preload every page thumbnail for online comics
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Tap Start Reading to stream pages online.'.tl,
+              style: ts.s12.copyWith(color: context.colorScheme.outline),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  Widget _buildThumbnailGrid(List<String> images) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 120,
-        childAspectRatio: 0.7,
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
-      ),
-      itemCount: images.length,
-      itemBuilder: (context, index) {
-        return GestureDetector(
-          onTap: () => _startReading(images, index),
-          child: Card(
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image(
-                  image: WebDavImageProvider(images[index]),
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const Center(
-                    child: Icon(Icons.broken_image),
-                  ),
-                ),
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    color: Colors.black54,
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Text(
-                      '${index + 1}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _openChapter(WebDavChapter chapter, int chapterIndex) async {
-    try {
-      // Pre-download next chapter in background
-      if (chapterIndex + 1 < _chapters!.length) {
-        WebDavProvider().preDownloadChapter(_chapters![chapterIndex + 1].path);
-      }
-
-      final images = await WebDavProvider().getChapterImages(chapter.path);
-      if (mounted) {
-        _startReading(images, 0, chapterIndex: chapterIndex);
-      }
-    } catch (e) {
-      if (mounted) {
-        context.showMessage(message: 'Failed to load chapter: $e');
-      }
+  void _openChapter(WebDavChapter chapter, int chapterIndex,
+      {int initialPage = 0}) async {
+    // Stream-first: open reader immediately; images load on demand.
+    if (mounted) {
+      _startReading(const [], initialPage, chapterIndex: chapterIndex);
     }
   }
 
-  /// Save a cover image to local cache for history display.
+  /// Save a cover image to local cache for history / favorites display.
   Future<String> _saveCoverToLocal(String coverUrl) async {
     try {
       final provider = WebDavProvider();
@@ -754,53 +753,62 @@ class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
       await file.writeAsBytes(data);
       return 'file://${file.path}';
     } catch (e) {
-      return '';
+      // Keep remote path so cover can still be loaded via WebDAV
+      return coverUrl.startsWith('webdav://') || coverUrl.startsWith('file://')
+          ? coverUrl
+          : (coverUrl.isNotEmpty ? 'webdav://$coverUrl' : '');
     }
   }
 
-  void _startReading(List<String> images, int initialPage, {int? chapterIndex}) async {
-    // Build chapters info if we have chapters
+  void _startReading(List<String> images, int initialPage,
+      {int? chapterIndex}) async {
+    // Chapter ids are remote paths so reader can stream without re-listing
     ComicChapters? chapters;
     if (_chapters != null && _chapters!.isNotEmpty) {
       final chapterMap = <String, String>{};
-      for (int i = 0; i < _chapters!.length; i++) {
-        chapterMap['$i'] = _chapters![i].name;
+      for (final c in _chapters!) {
+        chapterMap[c.path] = c.name;
       }
       chapters = ComicChapters(chapterMap);
     }
 
-    // Save cover locally for history display
+    final existing = HistoryManager().find(widget.comic.path, ComicType.webdav);
     final coverSource = widget.comic.coverPath ??
-        (images.isNotEmpty ? images.first : '');
+        (images.isNotEmpty ? images.first : existing?.cover ?? '');
     final coverLocal = coverSource.isNotEmpty
-        ? await _saveCoverToLocal(coverSource)
-        : '';
+        ? (coverSource.startsWith('file://')
+            ? coverSource
+            : await _saveCoverToLocal(coverSource))
+        : (existing?.cover ?? '');
 
-    // Create a history entry using History.fromModel
+    final ep = (chapterIndex ?? 0) + 1;
     final history = History.fromModel(
       model: _WebDavHistoryModel(
         title: widget.comic.name,
         cover: coverLocal,
         id: widget.comic.path,
-        maxPage: images.length,
+        maxPage: images.isNotEmpty ? images.length : existing?.maxPage,
       ),
-      ep: (chapterIndex ?? 0) + 1,
+      ep: ep,
       page: initialPage + 1,
       time: DateTime.now(),
     );
+    history.maxPage = images.isNotEmpty ? images.length : existing?.maxPage;
+    // Persist immediately so history list works even if reader exits early
+    HistoryManager().addHistory(history);
 
-    // Navigate to reader with custom image loading
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => _WebDavReader(
-          comicName: widget.comic.name,
-          comicPath: widget.comic.path,
-          images: images,
-          chapters: chapters,
-          initialChapter: chapterIndex != null ? chapterIndex + 1 : null,
-          initialPage: initialPage + 1,
-          history: history,
-        ),
+    if (!mounted) return;
+    context.to(
+      () => Reader(
+        type: ComicType.webdav,
+        cid: widget.comic.path,
+        name: widget.comic.name,
+        chapters: chapters,
+        initialChapter: chapters != null ? ep : 1,
+        initialPage: initialPage + 1,
+        history: history,
+        author: '',
+        tags: const [],
       ),
     );
   }
@@ -845,6 +853,7 @@ class _FavoriteButton extends StatefulWidget {
 
 class _FavoriteButtonState extends State<_FavoriteButton> {
   bool _isFavorite = false;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -855,39 +864,82 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
     );
   }
 
-  void _toggle() {
-    final folders = LocalFavoritesManager().folderNames;
-    if (folders.isEmpty) {
-      context.showMessage(message: 'No favorite folder'.tl);
-      return;
+  String _ensureFolder() {
+    final manager = LocalFavoritesManager();
+    final folders = manager.folderNames;
+    if (folders.isNotEmpty) return folders.first;
+    return manager.createFolder('default', true);
+  }
+
+  Future<String> _resolveCover() async {
+    var cover = widget.comic.coverPath ?? '';
+    if (cover.isEmpty) {
+      try {
+        await WebDavProvider().loadComics();
+      } catch (_) {}
+      cover = widget.comic.coverPath ?? '';
     }
-    final folder = folders.first;
-    setState(() {
+    if (cover.isEmpty) return '';
+    if (cover.startsWith('file://')) return cover;
+    try {
+      final data = await WebDavProvider().loadImage(cover);
+      final pathHash = widget.comic.path.hashCode.toRadixString(16);
+      final dir = Directory(FilePath.join(App.cachePath, 'webdav_covers'));
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      final ext = cover.contains('.png') ? '.png' : '.jpg';
+      final file = File(FilePath.join(dir.path, 'fav_$pathHash$ext'));
+      await file.writeAsBytes(data);
+      return 'file://${file.path}';
+    } catch (_) {
+      return cover.startsWith('webdav://') ? cover : 'webdav://$cover';
+    }
+  }
+
+  Future<void> _toggle() async {
+    if (_busy) return;
+    _busy = true;
+    try {
+      final folder = _ensureFolder();
       if (_isFavorite) {
-        LocalFavoritesManager().deleteComicWithId(
-          folder,
-          widget.comic.path,
-          ComicType.webdav,
-        );
-        _isFavorite = false;
+        // Remove from all folders that contain it
+        for (final f in LocalFavoritesManager().folderNames) {
+          if (LocalFavoritesManager().comicExists(f, widget.comic.path, ComicType.webdav)) {
+            LocalFavoritesManager().deleteComicWithId(
+              f,
+              widget.comic.path,
+              ComicType.webdav,
+            );
+          }
+        }
+        if (mounted) {
+          setState(() => _isFavorite = false);
+          context.showMessage(message: 'Removed from favorites'.tl);
+        }
       } else {
+        final cover = await _resolveCover();
         LocalFavoritesManager().addComic(
           folder,
           FavoriteItem(
             id: widget.comic.path,
             name: widget.comic.name,
-            coverPath: widget.comic.coverPath ?? '',
+            coverPath: cover,
             author: '',
             type: ComicType.webdav,
-            tags: [],
+            tags: const [],
           ),
         );
-        _isFavorite = true;
+        if (mounted) {
+          setState(() => _isFavorite = true);
+          context.showMessage(message: 'Added to favorites'.tl);
+        }
       }
-    });
-    context.showMessage(
-      message: _isFavorite ? 'Added to favorites'.tl : 'Removed from favorites'.tl,
-    );
+    } catch (e) {
+      if (mounted) {
+        context.showMessage(message: 'Failed: $e');
+      }
+    } finally {
+      _busy = false;
+    }
   }
 
   @override
@@ -897,42 +949,6 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
       color: _isFavorite ? Colors.red : null,
       onPressed: _toggle,
       tooltip: _isFavorite ? 'Remove from favorites'.tl : 'Add to favorites'.tl,
-    );
-  }
-}
-
-/// Custom reader wrapper that loads images from WebDAV.
-class _WebDavReader extends StatelessWidget {
-  final String comicName;
-  final String comicPath;
-  final List<String> images;
-  final ComicChapters? chapters;
-  final int? initialChapter;
-  final int initialPage;
-  final History history;
-
-  const _WebDavReader({
-    required this.comicName,
-    required this.comicPath,
-    required this.images,
-    this.chapters,
-    this.initialChapter,
-    required this.initialPage,
-    required this.history,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Reader(
-      type: ComicType.webdav,
-      cid: comicPath,
-      name: comicName,
-      chapters: chapters,
-      initialChapter: initialChapter ?? 1,
-      initialPage: initialPage,
-      history: history,
-      author: '',
-      tags: [],
     );
   }
 }

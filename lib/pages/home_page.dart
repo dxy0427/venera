@@ -1524,9 +1524,7 @@ class _ReadLaterPageState extends State<_ReadLaterPage> {
                       onClick: () {
                         ReadLaterManager().remove(
                           c.id,
-                          ComicType(
-                            c.sourceKey == 'local' ? 0 : c.sourceKey.hashCode,
-                          ),
+                          ComicType.fromKey(c.sourceKey),
                         );
                       },
                     ),

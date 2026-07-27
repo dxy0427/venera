@@ -87,6 +87,7 @@ class History implements Comic {
        subtitle = model.subTitle ?? '',
        cover = model.cover,
        id = model.id,
+       maxPage = model.maxPage,
        readEpisode = readChapters ?? <String>{},
        time = time ?? DateTime.now();
 
@@ -160,9 +161,7 @@ class History implements Comic {
   String? get language => null;
 
   @override
-  String get sourceKey => type == ComicType.local
-      ? 'local'
-      : type.comicSource?.key ?? "Unknown:${type.value}";
+  String get sourceKey => type.sourceKey;
 
   @override
   double? get stars => null;
@@ -517,8 +516,8 @@ class HistoryManager with ChangeNotifier {
   /// Fetches the latest cover, title and subtitle from the source.
   /// Keeps the reading progress (ep, page, etc.).
   Future<bool> refreshHistoryInfo(History history) async {
-    if (history.sourceKey == 'local') {
-      // Local comics don't need refresh
+    if (history.sourceKey == 'local' || history.sourceKey == 'webdav') {
+      // Local / WebDAV comics don't need network source refresh
       return false;
     }
 

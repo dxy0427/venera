@@ -46,6 +46,44 @@ class _ReaderWithLoadingState
       widget.id,
       ComicType.fromKey(widget.sourceKey),
     );
+    if (widget.sourceKey == 'webdav') {
+      try {
+        final provider = WebDavProvider();
+        final path = widget.id;
+        final name = path.split('/').where((s) => s.isNotEmpty).last;
+        ComicChapters? chapters;
+        if (path.endsWith('/')) {
+          final chapterList = await provider.getChapters(path);
+          if (chapterList.isNotEmpty) {
+            final map = <String, String>{};
+            for (final c in chapterList) {
+              map[c.path] = c.name;
+            }
+            chapters = ComicChapters(map);
+          }
+        }
+        final model = _WebDavReaderHistoryModel(
+          title: name,
+          cover: history?.cover ?? '',
+          id: path,
+          maxPage: history?.maxPage,
+        );
+        return Res(
+          ReaderProps(
+            type: ComicType.webdav,
+            cid: path,
+            name: name,
+            chapters: chapters,
+            history: history ??
+                History.fromModel(model: model, ep: 0, page: 0),
+            author: '',
+            tags: const [],
+          ),
+        );
+      } catch (e) {
+        return Res.error(e.toString());
+      }
+    }
     if (comicSource == null) {
       var localComic = LocalManager().find(
         widget.id,
@@ -111,4 +149,31 @@ class ReaderProps {
     required this.author,
     required this.tags,
   });
+}
+
+class _WebDavReaderHistoryModel with HistoryMixin {
+  @override
+  final String title;
+
+  @override
+  final String cover;
+
+  @override
+  final String id;
+
+  @override
+  final int? maxPage;
+
+  const _WebDavReaderHistoryModel({
+    required this.title,
+    required this.cover,
+    required this.id,
+    this.maxPage,
+  });
+
+  @override
+  String? get subTitle => null;
+
+  @override
+  HistoryType get historyType => ComicType.webdav;
 }

@@ -60,24 +60,15 @@ class _ReaderImagesState extends State<_ReaderImages> {
     if (inProgress) return;
     inProgress = true;
 
-    // Handle WebDAV comics
+    // Handle WebDAV comics (stream-first, no full download prefetch)
     if (_isWebDav) {
       try {
         final provider = WebDavProvider();
-        final chapterPath = reader.widget.chapters != null
-            ? null // Will be resolved from chapter index
-            : reader.cid;
-
         List<String> images;
         if (reader.widget.chapters != null) {
-          // Has chapters - load chapter images
-          final chapters = await provider.getChapters(reader.cid);
-          final chapterIndex = reader.chapter - 1;
-          if (chapterIndex < chapters.length) {
-            images = await provider.getChapterImages(chapters[chapterIndex].path);
-          } else {
-            throw Exception('Chapter not found');
-          }
+          // Chapter id is the remote path (see WebDavComicDetailPage)
+          final chapterPath = reader.eid;
+          images = await provider.getChapterImages(chapterPath);
         } else {
           images = await provider.getComicImages(reader.cid);
         }
