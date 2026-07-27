@@ -1,0 +1,977 @@
+import 'package:flutter/material.dart';
+import 'package:venera/components/components.dart';
+import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/comic_type.dart';
+import 'package:venera/foundation/favorites.dart';
+import 'package:venera/foundation/history.dart';
+import 'package:venera/pages/reader/reader.dart';
+import 'package:venera/utils/io.dart';
+import 'package:venera/utils/translations.dart';
+
+import 'package:venera/pages/webdav_comics/comic_info.dart';
+import 'webdav_image_provider.dart';
+import 'webdav_models.dart';
+import 'webdav_provider.dart';
+
+/// Sort mode for WebDAV comics.
+enum WebDavSortMode {
+  nameAsc('name_asc', 'Name ↑'),
+  nameDesc('name_desc', 'Name ↓'),
+  dateAsc('date_asc', 'Date ↑'),
+  dateDesc('date_desc', 'Date ↓'),
+  sizeAsc('size_asc', 'Size ↑'),
+  sizeDesc('size_desc', 'Size ↓');
+
+  final String key;
+  final String label;
+  const WebDavSortMode(this.key, this.label);
+}
+
+/// Breadcrumb segment for directory navigation.
+class _PathSegment {
+  final String name;
+  final String path;
+  const _PathSegment({required this.name, required this.path});
+}
+
+/// Main page for browsing WebDAV comics.
+class WebDavComicsPage extends StatefulWidget {
+  const WebDavComicsPage({super.key});
+
+  @override
+  State<WebDavComicsPage> createState() => _WebDavComicsPageState();
+}
+
+class _WebDavComicsPageState extends State<WebDavComicsPage> {
+  WebDavSortMode _sortMode = WebDavSortMode.nameAsc;
+
+  /// Current browsing path (null = root).
+  String? _currentPath;
+
+  /// Breadcrumb path segments.
+  final List<_PathSegment> _breadcrumbs = [];
+  @override
+  void initState() {
+    super.initState();
+    WebDavProvider().addListener(_onUpdate);
+    if (WebDavProvider().comics == null && !WebDavProvider().isLoading) {
+      WebDavProvider().loadComics();
+    }
+  }
+
+  void _navigateTo(String path, String name) {
+    setState(() {
+      _breadcrumbs.add(_PathSegment(name: name, path: _currentPath ?? ''));
+      _currentPath = path;
+    });
+    WebDavProvider().loadDirectory(path);
+  }
+
+  void _navigateBack() {
+    if (_breadcrumbs.isNotEmpty) {
+      final prev = _breadcrumbs.removeLast();
+      setState(() {
+        _currentPath = prev.path.isEmpty ? null : prev.path;
+      });
+      if (_currentPath == null) {
+        WebDavProvider().loadComics(forceRefresh: true);
+      } else {
+        WebDavProvider().loadDirectory(_currentPath!);
+      }
+    } else {
+      context.pop();
+    }
+  }
+
+  void _navigateToRoot() {
+    setState(() {
+      _breadcrumbs.clear();
+      _currentPath = null;
+    });
+    WebDavProvider().loadComics(forceRefresh: true);
+  }
+
+  @override
+  void dispose() {
+    WebDavProvider().removeListener(_onUpdate);
+    super.dispose();
+  }
+
+  void _onUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = WebDavProvider();
+
+    return Scaffold(
+      body: SmoothCustomScrollView(
+        slivers: [
+          SliverAppbar(
+            title: _breadcrumbs.isNotEmpty
+                ? GestureDetector(
+                    onTap: _navigateToRoot,
+                    child: Text(
+                      _breadcrumbs.last.name,
+                      style: ts.s16.copyWith(
+                        color: context.colorScheme.primary,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  )
+                : Text('WebDAV Comics'.tl),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: _navigateBack,
+            ),
+            actions: [
+              if (_breadcrumbs.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.home),
+                  onPressed: _navigateToRoot,
+                  tooltip: 'Back to root'.tl,
+                ),
+              IconButton(
+                icon: const Icon(Icons.sort),
+                onPressed: _showSortDialog,
+                tooltip: 'Sort'.tl,
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () {
+                  if (_currentPath != null) {
+                    WebDavProvider().loadDirectory(_currentPath!);
+                  } else {
+                    provider.refresh();
+                  }
+                },
+                tooltip: 'Refresh'.tl,
+              ),
+            ],
+          ),
+          if (provider.isLoading)
+            const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (provider.error != null)
+            SliverFillRemaining(
+              child: _buildError(provider.error!),
+            )
+          else if (_currentComics.isEmpty)
+            SliverFillRemaining(
+              child: _buildEmpty(),
+            )
+          else
+            _buildComicGrid(_currentComics),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError(String error) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.error_outline, size: 48, color: Colors.red),
+          const SizedBox(height: 16),
+          Text('Failed to load comics'.tl, style: ts.s18),
+          const SizedBox(height: 8),
+          Text(error, style: ts.s14, textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () => WebDavProvider().refresh(),
+            child: Text('Retry'.tl),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.folder_open, size: 48),
+          const SizedBox(height: 16),
+          Text('No comics found'.tl, style: ts.s18),
+          const SizedBox(height: 8),
+          Text(
+            'Make sure the WebDAV path contains comic directories or archives.',
+            style: ts.s14,
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSortDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return ContentDialog(
+              title: 'Sort'.tl,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: WebDavSortMode.values.map((mode) {
+                  return RadioListTile<WebDavSortMode>(
+                    title: Text(mode.label.tl),
+                    value: mode,
+                    groupValue: _sortMode,
+                    onChanged: (v) {
+                      if (v != null) {
+                        setDialogState(() => _sortMode = v);
+                        setState(() {});
+                        Navigator.pop(context);
+                      }
+                    },
+                  );
+                }).toList(),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  List<WebDavComicEntry> _sortComics(List<WebDavComicEntry> comics) {
+    final sorted = List<WebDavComicEntry>.from(comics);
+    // Category folders always come first
+    sorted.sort((a, b) {
+      if (a.isCategory && !b.isCategory) return -1;
+      if (!a.isCategory && b.isCategory) return 1;
+      // Then sort by selected mode
+      switch (_sortMode) {
+        case WebDavSortMode.nameAsc:
+          return a.name.compareTo(b.name);
+        case WebDavSortMode.nameDesc:
+          return b.name.compareTo(a.name);
+        case WebDavSortMode.dateAsc:
+          return (a.modified ?? DateTime(2000))
+              .compareTo(b.modified ?? DateTime(2000));
+        case WebDavSortMode.dateDesc:
+          return (b.modified ?? DateTime(2000))
+              .compareTo(a.modified ?? DateTime(2000));
+        case WebDavSortMode.sizeAsc:
+          if (a.isDirectory && !b.isDirectory) return 1;
+          if (!a.isDirectory && b.isDirectory) return -1;
+          return a.size.compareTo(b.size);
+        case WebDavSortMode.sizeDesc:
+          if (a.isDirectory && !b.isDirectory) return 1;
+          if (!a.isDirectory && b.isDirectory) return -1;
+          return b.size.compareTo(a.size);
+      }
+    });
+    return sorted;
+  }
+
+  Widget _buildComicGrid(List<WebDavComicEntry> comics) {
+    final sorted = _sortComics(comics);
+    return SliverGrid(
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 180,
+        childAspectRatio: 0.72,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+      ),
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          if (index >= sorted.length) return null;
+          return _WebDavComicCard(
+            comic: sorted[index],
+            onTap: () => _openComic(sorted[index]),
+          );
+        },
+        childCount: sorted.length,
+      ),
+    );
+  }
+
+  List<WebDavComicEntry> get _currentComics {
+    return WebDavProvider().directoryEntries ?? WebDavProvider().comics ?? [];
+  }
+
+  void _openComic(WebDavComicEntry comic) {
+    if (comic.isDirectory) {
+      // Navigate into directory (could be category or comic)
+      _navigateTo(comic.path, comic.name);
+    } else {
+      // Archive file - open detail page
+      context.to(() => WebDavComicDetailPage(comic: comic));
+    }
+  }
+}
+
+/// Card widget displaying a WebDAV comic thumbnail.
+class _WebDavComicCard extends StatelessWidget {
+  final WebDavComicEntry comic;
+  final VoidCallback onTap;
+
+  const _WebDavComicCard({required this.comic, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _buildCover(context),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    comic.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts.s14.withBold,
+                  ),
+                  if (comic.imageCount != null)
+                    Text(
+                      '${comic.imageCount} pages',
+                      style: ts.s12.copyWith(
+                        color: context.colorScheme.outline,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCover(BuildContext context) {
+    if (comic.coverPath != null) {
+      return Image(
+        image: WebDavImageProvider(comic.coverPath!),
+        fit: BoxFit.cover,
+        width: double.infinity,
+        errorBuilder: (_, __, ___) => _buildPlaceholder(),
+        loadingBuilder: (_, child, progress) {
+          if (progress == null) return child;
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        },
+      );
+    }
+    return _buildPlaceholder();
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      color: Colors.grey[300],
+      child: Center(
+        child: Icon(
+          comic.isCategory
+              ? Icons.folder_open
+              : (comic.isDirectory ? Icons.folder : Icons.archive),
+          size: 48,
+          color: comic.isCategory ? Colors.amber[700] : Colors.grey[600],
+        ),
+      ),
+    );
+  }
+}
+
+/// Detail page for a single WebDAV comic - shows chapters or images.
+class WebDavComicDetailPage extends StatefulWidget {
+  final WebDavComicEntry comic;
+
+  const WebDavComicDetailPage({required this.comic});
+
+  @override
+  State<WebDavComicDetailPage> createState() => WebDavComicDetailPageState();
+}
+
+class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
+  List<WebDavChapter>? _chapters;
+  List<String>? _images;
+  ComicInfo? _info;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WebDavProvider().addListener(_onUpdate);
+    _loadComic();
+  }
+
+  @override
+  void dispose() {
+    WebDavProvider().removeListener(_onUpdate);
+    super.dispose();
+  }
+
+  void _onUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadComic() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final provider = WebDavProvider();
+
+      // Try to load info.json
+      _info = await provider.loadComicInfo(widget.comic.path);
+
+      if (widget.comic.isDirectory) {
+        final chapters = await provider.getChapters(widget.comic.path);
+        if (chapters.isNotEmpty) {
+          setState(() {
+            _chapters = chapters;
+            _loading = false;
+          });
+        } else {
+          final images = await provider.getComicImages(widget.comic.path);
+          setState(() {
+            _images = images;
+            _loading = false;
+          });
+        }
+      } else {
+        final images = await provider.getComicImages(widget.comic.path);
+        setState(() {
+          _images = images;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final info = _info;
+    final displayTitle = info?.title ?? widget.comic.name;
+
+    return Scaffold(
+      body: SmoothCustomScrollView(
+        slivers: [
+          SliverAppbar(
+            title: Text(displayTitle),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => context.pop(),
+            ),
+            actions: [
+              _FavoriteButton(comic: widget.comic),
+            ],
+          ),
+          // Breadcrumb
+          if (_breadcrumbs.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: _navigateToRoot,
+                      child: Icon(Icons.home, size: 16,
+                          color: context.colorScheme.primary),
+                    ),
+                    for (int i = 0; i < _breadcrumbs.length; i++) ...[
+                      const Icon(Icons.chevron_right, size: 16),
+                      GestureDetector(
+                        onTap: () {
+                          // Navigate to this breadcrumb level
+                          while (_breadcrumbs.length > i + 1) {
+                            _breadcrumbs.removeLast();
+                          }
+                          final seg = _breadcrumbs.removeLast();
+                          setState(() {
+                            _currentPath = seg.path.isEmpty ? null : seg.path;
+                          });
+                          if (_currentPath == null) {
+                            WebDavProvider().loadComics(forceRefresh: true);
+                          } else {
+                            WebDavProvider().loadDirectory(_currentPath!);
+                          }
+                        },
+                        child: Text(
+                          _breadcrumbs[i].name,
+                          style: ts.s12.copyWith(
+                            color: context.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const Icon(Icons.chevron_right, size: 16),
+                    Text(
+                      _currentPath?.split('/').where((s) => s.isNotEmpty).last ?? 'Root',
+                      style: ts.s12.withBold,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            SliverFillRemaining(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error, size: 48, color: Colors.red),
+                    const SizedBox(height: 16),
+                    Text(_error!),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _loadComic,
+                      child: Text('Retry'.tl),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else ...[
+            // Metadata section
+            if (info != null && !info.isEmpty) _buildMetadata(info),
+            // Content
+            if (_chapters != null)
+              _buildChapterList()
+            else if (_images != null)
+              _buildImageList()
+            else
+              SliverFillRemaining(
+                child: Center(child: Text('No content found'.tl)),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetadata(ComicInfo info) {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Author
+            if (info.author != null && info.author!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  info.author!,
+                  style: ts.s14.copyWith(
+                    color: context.colorScheme.outline,
+                  ),
+                ),
+              ),
+            // Stars
+            if (info.stars != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    ...List.generate(5, (i) {
+                      return Icon(
+                        i < info.stars!.floor()
+                            ? Icons.star
+                            : (i < info.stars!
+                                ? Icons.star_half
+                                : Icons.star_border),
+                        color: Colors.amber,
+                        size: 20,
+                      );
+                    }),
+                    const SizedBox(width: 8),
+                    Text(
+                      info.stars!.toStringAsFixed(1),
+                      style: ts.s14.withBold,
+                    ),
+                  ],
+                ),
+              ),
+            // Description
+            if (info.description != null && info.description!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  info.description!,
+                  style: ts.s14,
+                ),
+              ),
+            // Tags
+            if (info.tags.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var entry in info.tags.entries) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: context.colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        entry.key,
+                        style: ts.s12.withBold.withColor(
+                          context.colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                    for (var tag in entry.value)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: context.colorScheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(tag, style: ts.s12),
+                      ),
+                  ],
+                ],
+              ),
+            const SizedBox(height: 8),
+            const Divider(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChapterList() {
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          final chapter = _chapters![index];
+          final isDownloading =
+              WebDavProvider().downloadingChapters.contains(chapter.path);
+          final progress = WebDavProvider().getDownloadProgress(chapter.path);
+          final isCached = WebDavProvider().isCbzCached(chapter.path);
+
+          return ListTile(
+            leading: CircleAvatar(
+              child: isCached
+                  ? const Icon(Icons.check, size: 18)
+                  : Text('${index + 1}'),
+            ),
+            title: Text(chapter.name),
+            subtitle: isDownloading
+                ? LinearProgressIndicator(value: progress)
+                : Text(chapter.imageCount > 0
+                    ? '${chapter.imageCount} pages'
+                    : (isCached ? 'Cached' : 'CBZ')),
+            trailing: isDownloading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right),
+            onTap: isDownloading ? null : () => _openChapter(chapter, index),
+          );
+        },
+        childCount: _chapters!.length,
+      ),
+    );
+  }
+
+  Widget _buildImageList() {
+    return SliverToBoxAdapter(
+      child: Column(
+        children: [
+          const SizedBox(height: 16),
+          Text(
+            '${_images!.length} pages',
+            style: ts.s16,
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: () => _startReading(_images!, 0),
+            icon: const Icon(Icons.play_arrow),
+            label: Text('Start Reading'.tl),
+          ),
+          const SizedBox(height: 16),
+          _buildThumbnailGrid(_images!),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThumbnailGrid(List<String> images) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 120,
+        childAspectRatio: 0.7,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
+      ),
+      itemCount: images.length,
+      itemBuilder: (context, index) {
+        return GestureDetector(
+          onTap: () => _startReading(images, index),
+          child: Card(
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image(
+                  image: WebDavImageProvider(images[index]),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image),
+                  ),
+                ),
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: Colors.black54,
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(
+                      '${index + 1}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openChapter(WebDavChapter chapter, int chapterIndex) async {
+    try {
+      // Pre-download next chapter in background
+      if (chapterIndex + 1 < _chapters!.length) {
+        WebDavProvider().preDownloadChapter(_chapters![chapterIndex + 1].path);
+      }
+
+      final images = await WebDavProvider().getChapterImages(chapter.path);
+      if (mounted) {
+        _startReading(images, 0, chapterIndex: chapterIndex);
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showMessage(message: 'Failed to load chapter: $e');
+      }
+    }
+  }
+
+  /// Save a cover image to local cache for history display.
+  Future<String> _saveCoverToLocal(String coverUrl) async {
+    try {
+      final provider = WebDavProvider();
+      final data = await provider.loadImage(coverUrl);
+      final pathHash = widget.comic.path.hashCode.toRadixString(16);
+      final dir = Directory(
+        FilePath.join(App.cachePath, 'webdav_covers'),
+      );
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      final ext = coverUrl.contains('.png') ? '.png' : '.jpg';
+      final file = File(FilePath.join(dir.path, '$pathHash$ext'));
+      await file.writeAsBytes(data);
+      return 'file://${file.path}';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  void _startReading(List<String> images, int initialPage, {int? chapterIndex}) async {
+    // Build chapters info if we have chapters
+    ComicChapters? chapters;
+    if (_chapters != null && _chapters!.isNotEmpty) {
+      final chapterMap = <String, String>{};
+      for (int i = 0; i < _chapters!.length; i++) {
+        chapterMap['$i'] = _chapters![i].name;
+      }
+      chapters = ComicChapters(chapterMap);
+    }
+
+    // Save cover locally for history display
+    final coverSource = widget.comic.coverPath ??
+        (images.isNotEmpty ? images.first : '');
+    final coverLocal = coverSource.isNotEmpty
+        ? await _saveCoverToLocal(coverSource)
+        : '';
+
+    // Create a history entry using History.fromModel
+    final history = History.fromModel(
+      model: _WebDavHistoryModel(
+        title: widget.comic.name,
+        cover: coverLocal,
+        id: widget.comic.path,
+        maxPage: images.length,
+      ),
+      ep: (chapterIndex ?? 0) + 1,
+      page: initialPage + 1,
+      time: DateTime.now(),
+    );
+
+    // Navigate to reader with custom image loading
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => _WebDavReader(
+          comicName: widget.comic.name,
+          comicPath: widget.comic.path,
+          images: images,
+          chapters: chapters,
+          initialChapter: chapterIndex != null ? chapterIndex + 1 : null,
+          initialPage: initialPage + 1,
+          history: history,
+        ),
+      ),
+    );
+  }
+}
+
+/// Simple HistoryMixin implementation for WebDAV comics.
+class _WebDavHistoryModel with HistoryMixin {
+  @override
+  final String title;
+
+  @override
+  final String cover;
+
+  @override
+  final String id;
+
+  @override
+  final int? maxPage;
+
+  const _WebDavHistoryModel({
+    required this.title,
+    required this.cover,
+    required this.id,
+    this.maxPage,
+  });
+
+  @override
+  String? get subTitle => null;
+
+  @override
+  HistoryType get historyType => ComicType.webdav;
+}
+
+/// Favorite button for WebDAV comics.
+class _FavoriteButton extends StatefulWidget {
+  final WebDavComicEntry comic;
+  const _FavoriteButton({required this.comic});
+
+  @override
+  State<_FavoriteButton> createState() => _FavoriteButtonState();
+}
+
+class _FavoriteButtonState extends State<_FavoriteButton> {
+  bool _isFavorite = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isFavorite = LocalFavoritesManager().isExist(
+      widget.comic.path,
+      ComicType.webdav,
+    );
+  }
+
+  void _toggle() {
+    setState(() {
+      if (_isFavorite) {
+        LocalFavoritesManager().deleteComicWithId(
+          LocalFavoritesManager().folderNames.first,
+          widget.comic.path,
+          ComicType.webdav,
+        );
+        _isFavorite = false;
+      } else {
+        LocalFavoritesManager().addComic(
+          LocalFavoritesManager().folderNames.first,
+          FavoriteItem(
+            id: widget.comic.path,
+            name: widget.comic.name,
+            coverPath: widget.comic.coverPath ?? '',
+            author: '',
+            type: ComicType.webdav,
+            tags: [],
+          ),
+        );
+        _isFavorite = true;
+      }
+    });
+    context.showMessage(
+      message: _isFavorite ? 'Added to favorites'.tl : 'Removed from favorites'.tl,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border),
+      color: _isFavorite ? Colors.red : null,
+      onPressed: _toggle,
+      tooltip: _isFavorite ? 'Remove from favorites'.tl : 'Add to favorites'.tl,
+    );
+  }
+}
+
+/// Custom reader wrapper that loads images from WebDAV.
+class _WebDavReader extends StatelessWidget {
+  final String comicName;
+  final String comicPath;
+  final List<String> images;
+  final ComicChapters? chapters;
+  final int? initialChapter;
+  final int initialPage;
+  final History history;
+
+  const _WebDavReader({
+    required this.comicName,
+    required this.comicPath,
+    required this.images,
+    this.chapters,
+    this.initialChapter,
+    required this.initialPage,
+    required this.history,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Reader(
+      type: ComicType.webdav,
+      cid: comicPath,
+      name: comicName,
+      chapters: chapters,
+      initialChapter: initialChapter ?? 1,
+      initialPage: initialPage,
+      history: history,
+      author: '',
+      tags: [],
+    );
+  }
+}

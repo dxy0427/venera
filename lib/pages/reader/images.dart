@@ -53,9 +53,58 @@ class _ReaderImagesState extends State<_ReaderImages> {
     }
   }
 
+  /// Whether the current reader is for a WebDAV comic.
+  bool get _isWebDav => reader.type == ComicType.webdav;
+
   void load() async {
     if (inProgress) return;
     inProgress = true;
+
+    // Handle WebDAV comics
+    if (_isWebDav) {
+      try {
+        final provider = WebDavProvider();
+        final chapterPath = reader.widget.chapters != null
+            ? null // Will be resolved from chapter index
+            : reader.cid;
+
+        List<String> images;
+        if (reader.widget.chapters != null) {
+          // Has chapters - load chapter images
+          final chapters = await provider.getChapters(reader.cid);
+          final chapterIndex = reader.chapter - 1;
+          if (chapterIndex < chapters.length) {
+            images = await provider.getChapterImages(chapters[chapterIndex].path);
+          } else {
+            throw Exception('Chapter not found');
+          }
+        } else {
+          images = await provider.getComicImages(reader.cid);
+        }
+
+        if (!mounted) return;
+        setState(() {
+          reader.images = images;
+          reader.isLoading = false;
+          inProgress = false;
+          _handleJumpToLastPage();
+          Future.microtask(() {
+            reader.updateHistory();
+          });
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          error = e.toString();
+          reader.isLoading = false;
+          inProgress = false;
+        });
+      }
+      if (!mounted) return;
+      context.readerScaffold.update();
+      return;
+    }
+
     if (reader.type == ComicType.local ||
         (LocalManager().isDownloaded(
           reader.cid,
@@ -680,6 +729,8 @@ class _GalleryModeState extends State<_GalleryMode>
     if (imageKey == null) return null;
     if (imageKey.startsWith("file://")) {
       return await File(imageKey.substring(7)).readAsBytes();
+    } else if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+      return await WebDavProvider().loadImage(imageKey);
     } else {
       return (await CacheManager().findCache(
         "$imageKey@${context.reader.type.sourceKey}@${context.reader.cid}@${context.reader.eid}",
@@ -705,11 +756,11 @@ class _GalleryModeState extends State<_GalleryMode>
 
     for (var imageState in imageStates) {
       if ((imageState as _ComicImageState).containsPoint(offset)) {
-        var imageKey =
-            (imageState.widget.image as ReaderImageProvider).imageKey;
-        int index = reader.images!.indexOf(imageKey);
-        if (index >= startIndex && index < endIndex) {
-          return imageKey;
+        var provider = imageState.widget.image;
+        if (provider is ReaderImageProvider) {
+          return provider.imageKey;
+        } else if (provider is WebDavReaderImageProvider) {
+          return provider.path;
         }
       }
     }
@@ -1272,6 +1323,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
     if (imageKey == null) return null;
     if (imageKey.startsWith("file://")) {
       return await File(imageKey.substring(7)).readAsBytes();
+    } else if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+      return await WebDavProvider().loadImage(imageKey);
     } else {
       return (await CacheManager().findCache(
         "$imageKey@${context.reader.type.sourceKey}@${context.reader.cid}@${context.reader.eid}",
@@ -1284,7 +1337,12 @@ class _ContinuousModeState extends State<_ContinuousMode>
     String? imageKey;
     for (var imageState in imageStates) {
       if ((imageState as _ComicImageState).containsPoint(offset)) {
-        imageKey = (imageState.widget.image as ReaderImageProvider).imageKey;
+        var provider = imageState.widget.image;
+        if (provider is ReaderImageProvider) {
+          imageKey = provider.imageKey;
+        } else if (provider is WebDavReaderImageProvider) {
+          imageKey = provider.path;
+        }
       }
     }
     return imageKey;
@@ -1297,6 +1355,13 @@ ImageProvider _createImageProviderFromKey(
   int page,
 ) {
   var reader = context.reader;
+  // Handle WebDAV image keys
+  if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+    return WebDavReaderImageProvider(
+      imageKey,
+      page: page,
+    );
+  }
   // Find the _ReaderImagesState ancestor to get the callback
   _ReaderImagesState? imagesState;
   context.visitAncestorElements((element) {
@@ -1342,6 +1407,11 @@ void _preDownloadImage(int page, BuildContext context) {
   var reader = context.reader;
   var imageKey = reader.images![page - 1];
   if (imageKey.startsWith("file://")) {
+    return;
+  }
+  // WebDAV images are cached by WebDavProvider.loadImage
+  if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+    WebDavProvider().loadImage(imageKey);
     return;
   }
   var cid = reader.cid;

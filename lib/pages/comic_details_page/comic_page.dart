@@ -18,6 +18,9 @@ import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/image_provider/cached_image.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/read_later.dart';
+import 'package:venera/pages/webdav_comics/comic_info.dart';
+import 'package:venera/pages/webdav_comics/webdav_comics_page.dart';
+import 'package:venera/pages/webdav_comics/webdav_models.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/network/cache.dart';
@@ -218,6 +221,32 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       if (localComic == null) {
         return const Res.error('Local comic not found');
       }
+
+      // Try to load info.json from local directory
+      ComicInfo? localInfo;
+      final infoFile = File(FilePath.join(localComic.baseDir, 'info.json'));
+      if (await infoFile.exists()) {
+        localInfo = await ComicInfo.fromFile(infoFile);
+      }
+
+      if (localInfo != null && !localInfo.isEmpty) {
+        // Has info.json - show detail page
+        if (isFirst) {
+          Future.microtask(() {
+            if (!App.rootContext.mounted) return;
+            App.rootContext.to(() => _LocalComicDetailPage(
+              comic: localComic,
+              info: localInfo!,
+            ));
+            App.mainNavigatorKey!.currentContext!.pop();
+          });
+          isFirst = false;
+        }
+        await Future.delayed(const Duration(milliseconds: 200));
+        return const Res.error('Local comic');
+      }
+
+      // No info.json - go directly to reader (original behavior)
       var history = HistoryManager().find(widget.id, ComicType.local);
       if (isFirst) {
         Future.microtask(() {
@@ -244,6 +273,28 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       }
       await Future.delayed(const Duration(milliseconds: 200));
       return const Res.error('Local comic');
+    }
+    if (widget.sourceKey == 'webdav') {
+      // WebDAV comic - show detail page
+      if (isFirst) {
+        Future.microtask(() {
+          if (!App.rootContext.mounted) return;
+          // Build a WebDavComicEntry from the stored info
+          final path = widget.id;
+          final name = widget.title ??
+              path.split('/').where((s) => s.isNotEmpty).last;
+          final entry = WebDavComicEntry(
+            name: name,
+            path: path,
+            isDirectory: path.endsWith('/'),
+          );
+          App.rootContext.to(() => WebDavComicDetailPage(comic: entry));
+          App.mainNavigatorKey!.currentContext!.pop();
+        });
+        isFirst = false;
+      }
+      await Future.delayed(const Duration(milliseconds: 200));
+      return const Res.error('WebDAV comic');
     }
     var comicSource = ComicSource.find(widget.sourceKey);
     if (comicSource == null) {
@@ -1102,3 +1153,210 @@ class _ComicPageLoadingPlaceHolder extends StatelessWidget {
     );
   }
 }
+
+/// Simple HistoryMixin for WebDAV comics used in ComicPage.
+/// Detail page for local comics with info.json.
+class _LocalComicDetailPage extends StatelessWidget {
+  final LocalComic comic;
+  final ComicInfo info;
+
+  const _LocalComicDetailPage({required this.comic, required this.info});
+
+  @override
+  Widget build(BuildContext context) {
+    final displayTitle = info.title ?? comic.title;
+
+    return Scaffold(
+      body: SmoothCustomScrollView(
+        slivers: [
+          SliverAppbar(
+            title: Text(displayTitle),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => context.pop(),
+            ),
+          ),
+          // Cover
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 280,
+              child: Image(
+                image: LocalComicImage(comic.id, comic.comicType),
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Icon(Icons.broken_image, size: 48),
+                ),
+              ),
+            ),
+          ),
+          // Metadata
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Author
+                  if (info.author != null && info.author!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        info.author!,
+                        style: ts.s14.copyWith(
+                          color: context.colorScheme.outline,
+                        ),
+                      ),
+                    ),
+                  // Stars
+                  if (info.stars != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          ...List.generate(5, (i) {
+                            return Icon(
+                              i < info.stars!.floor()
+                                  ? Icons.star
+                                  : (i < info.stars!
+                                      ? Icons.star_half
+                                      : Icons.star_border),
+                              color: Colors.amber,
+                              size: 20,
+                            );
+                          }),
+                          const SizedBox(width: 8),
+                          Text(
+                            info.stars!.toStringAsFixed(1),
+                            style: ts.s14.withBold,
+                          ),
+                        ],
+                      ),
+                    ),
+                  // Description
+                  if (info.description != null &&
+                      info.description!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(info.description!, style: ts.s14),
+                    ),
+                  // Tags
+                  if (info.tags.isNotEmpty)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (var entry in info.tags.entries) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: context.colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              entry.key,
+                              style: ts.s12.withBold.withColor(
+                                context.colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                          for (var tag in entry.value)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: context
+                                    .colorScheme.surfaceContainerLow,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(tag, style: ts.s12),
+                            ),
+                        ],
+                      ],
+                    ),
+                  const SizedBox(height: 16),
+                  // Read button
+                  Center(
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        var history = HistoryManager().find(
+                            comic.id, comic.comicType);
+                        context.to(() => Reader(
+                              type: comic.comicType,
+                              cid: comic.id,
+                              name: comic.title,
+                              chapters: comic.chapters,
+                              initialPage: history?.page,
+                              initialChapter: history?.ep,
+                              initialChapterGroup: history?.group,
+                              history: history ??
+                                  History.fromModel(
+                                      model: comic, ep: 0, page: 0),
+                              author: comic.subTitle ?? '',
+                              tags: comic.tags,
+                            ));
+                      },
+                      icon: const Icon(Icons.play_arrow),
+                      label: Text('Read'.tl),
+                    ),
+                  ),
+                  if (comic.chapters != null) ...[
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    Text('Chapters'.tl, style: ts.s16.withBold),
+                    const SizedBox(height: 8),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          // Chapter list
+          if (comic.chapters != null)
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final chapters = comic.chapters!;
+                  final id = chapters.ids.elementAt(index);
+                  final name = chapters[id] ?? id;
+                  final isDownloaded =
+                      comic.downloadedChapters.contains(id);
+                  return ListTile(
+                    leading: CircleAvatar(
+                      child: isDownloaded
+                          ? const Icon(Icons.check, size: 18)
+                          : Text('${index + 1}'),
+                    ),
+                    title: Text(name),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: isDownloaded
+                        ? () {
+                            var history = HistoryManager()
+                                .find(comic.id, comic.comicType);
+                            context.to(() => Reader(
+                                  type: comic.comicType,
+                                  cid: comic.id,
+                                  name: comic.title,
+                                  chapters: comic.chapters,
+                                  initialChapter: index + 1,
+                                  initialPage: history?.page,
+                                  history: history ??
+                                      History.fromModel(
+                                          model: comic,
+                                          ep: index + 1,
+                                          page: 0),
+                                  author: comic.subTitle ?? '',
+                                  tags: comic.tags,
+                                ));
+                          }
+                        : null,
+                  );
+                },
+                childCount: comic.chapters?.length ?? 0,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+

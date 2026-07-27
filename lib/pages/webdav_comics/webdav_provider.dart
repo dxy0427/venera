@@ -1,0 +1,492 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/cache_manager.dart';
+import 'package:venera/foundation/log.dart';
+import 'package:venera/utils/cbz.dart';
+import 'package:venera/utils/io.dart';
+
+import 'webdav_client.dart';
+import 'webdav_models.dart';
+import 'streaming_zip.dart';
+import 'comic_info.dart';
+
+/// Manages WebDAV comic state - connection, caching, and data.
+class WebDavProvider with ChangeNotifier {
+  static WebDavProvider? _instance;
+
+  WebDavProvider._();
+
+  factory WebDavProvider() => _instance ??= WebDavProvider._();
+
+  final WebDavComicClient _client = WebDavComicClient();
+
+  List<WebDavComicEntry>? _comics;
+  bool _isLoading = false;
+  String? _error;
+
+  List<WebDavComicEntry>? get comics => _comics;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
+  bool get isConfigured => _client.isConfigured;
+
+  /// Currently downloading chapter paths (for progress display).
+  final Set<String> _downloadingChapters = {};
+  Set<String> get downloadingChapters => _downloadingChapters;
+
+  /// Download progress for each chapter (0.0 ~ 1.0).
+  final Map<String, double> _downloadProgress = {};
+  double? getDownloadProgress(String path) => _downloadProgress[path];
+
+  /// Load comics list from WebDAV server.
+  Future<void> loadComics({bool forceRefresh = false}) async {
+    if (_isLoading) return;
+    if (!isConfigured) {
+      _error = 'WebDAV not configured';
+      notifyListeners();
+      return;
+    }
+
+    if (!forceRefresh && _comics != null) return;
+
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _comics = await _client.listComics();
+      _loadCoversInBackground();
+    } catch (e) {
+      _error = e.toString();
+      _comics = null;
+      Log.error("WebDavProvider", "Failed to load comics: $e");
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void _loadCoversInBackground() async {
+    if (_comics == null) return;
+    for (int i = 0; i < _comics!.length; i++) {
+      final comic = _comics![i];
+      if (comic.coverPath != null) continue;
+      try {
+        await _client.loadCover(comic);
+        if (comic.coverPath != null) notifyListeners();
+      } catch (e) {
+        Log.error(
+            "WebDavProvider", "Failed to load cover for ${comic.name}: $e");
+      }
+    }
+  }
+
+  /// Get image paths for a comic.
+  Future<List<String>> getComicImages(String comicId) async {
+    final path = comicId;
+    if (path.endsWith('/')) {
+      final hasChapters = await _client.hasChapters(path);
+      if (hasChapters) return [];
+      final images = await _client.listImages(path);
+      return images.map((e) => 'webdav://${e.path}').toList();
+    } else {
+      // Try streaming first, fall back to download
+      try {
+        return await _streamCbz(path);
+      } catch (e) {
+        Log.warning("WebDavProvider", "Streaming failed, falling back to download: $e");
+        return _downloadAndExtractCbz(path);
+      }
+    }
+  }
+
+  /// Get chapters for a comic.
+  Future<List<WebDavChapter>> getChapters(String dirPath) async {
+    final chapters = await _client.listChapters(dirPath);
+    if (chapters.isNotEmpty) return chapters;
+    final cbzFiles = await _client.listCbzFiles(dirPath);
+    if (cbzFiles.isNotEmpty) {
+      return cbzFiles
+          .map((f) => WebDavChapter(
+                name: f.name,
+                path: f.path,
+                imageCount: 0,
+              ))
+          .toList();
+    }
+    return [];
+  }
+
+  /// Get images for a specific chapter.
+  Future<List<String>> getChapterImages(String chapterPath) async {
+    if (chapterPath.endsWith('.cbz') || chapterPath.endsWith('.zip')) {
+      // Try streaming first, fall back to download
+      try {
+        return await _streamCbz(chapterPath);
+      } catch (e) {
+        Log.warning("WebDavProvider", "Streaming failed, falling back to download: $e");
+        return _downloadAndExtractCbz(chapterPath);
+      }
+    }
+    final images = await _client.listImages(chapterPath);
+    return images.map((e) => 'webdav://${e.path}').toList();
+  }
+
+  /// Get the cache directory for a CBZ file.
+  Directory getCbzCacheDir(String remotePath) {
+    final pathHash = remotePath.hashCode.toRadixString(16);
+    return Directory(FilePath.join(App.cachePath, 'webdav_cbz', pathHash));
+  }
+
+  /// Check if a CBZ is already cached.
+  bool isCbzCached(String remotePath) {
+    final dir = getCbzCacheDir(remotePath);
+    if (!dir.existsSync()) return false;
+    return _listLocalImages(dir).isNotEmpty;
+  }
+
+  /// Stream a CBZ file: list entries and return image paths with stream:// protocol.
+  Future<List<String>> _streamCbz(String remotePath) async {
+    // Check cache first
+    final cacheDir = getCbzCacheDir(remotePath);
+    if (cacheDir.existsSync()) {
+      final images = _listLocalImages(cacheDir);
+      if (images.isNotEmpty) return images;
+    }
+
+    // Use streaming ZIP reader
+    final config = _client.getConfig();
+    if (config == null) throw Exception('WebDAV not configured');
+
+    final reader = StreamingZipReader(
+      webdavUrl: '${config[0].replaceAll(RegExp(r'/+\$'), '')}${remotePath.startsWith('/') ? remotePath : '/$remotePath'}',
+      user: config[1],
+      pass: config[2],
+    );
+
+    try {
+      final entries = await reader.listEntries();
+      final imageEntries = entries.where((e) {
+        if (e.isDirectory) return false;
+        final ext = _getExtension(e.fileName).toLowerCase();
+        return {
+          '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'
+        }.contains(ext);
+      }).toList();
+
+      // Sort naturally
+      imageEntries.sort((a, b) => _naturalCompare(a.fileName, b.fileName));
+
+      if (imageEntries.isEmpty) throw Exception('No images in CBZ');
+
+      // Store the reader for later image loading
+      _streamingReaders[remotePath] = _StreamInfo(
+        reader: reader,
+        entries: imageEntries,
+      );
+
+      // Return stream:// paths
+      return imageEntries
+          .map((e) => 'stream://${remotePath}/${e.fileName}')
+          .toList();
+    } catch (e) {
+      reader.dispose();
+      rethrow;
+    }
+  }
+
+  /// Cache for streaming ZIP readers.
+  final Map<String, _StreamInfo> _streamingReaders = {};
+
+  /// Load a single image from a streaming CBZ entry.
+  Future<Uint8List> loadStreamImage(String streamPath) async {
+    // streamPath format: stream://remotePath/entryFileName
+    final withoutProtocol = streamPath.substring(9); // remove 'stream://'
+    final firstSlash = withoutProtocol.indexOf('/');
+    final remotePath = withoutProtocol.substring(0, firstSlash);
+    final entryName = withoutProtocol.substring(firstSlash + 1);
+
+    // Check image cache
+    final cacheKey = 'webdav_stream_$remotePath/$entryName';
+    final cached = await CacheManager().findCache(cacheKey);
+    if (cached != null) return cached.readAsBytes();
+
+    // Load from streaming reader
+    final info = _streamingReaders[remotePath];
+    if (info == null) throw Exception('Stream not initialized for $remotePath');
+
+    final data = await info.reader.readEntry(entryName);
+    await CacheManager().writeCache(cacheKey, data, 30 * 24 * 60 * 60 * 1000);
+    return data;
+  }
+
+  /// Download a CBZ file, extract it, return local image paths.
+  Future<List<String>> _downloadAndExtractCbz(String remotePath) async {
+    final cacheDir = getCbzCacheDir(remotePath);
+
+    // Already cached?
+    if (cacheDir.existsSync()) {
+      final images = _listLocalImages(cacheDir);
+      if (images.isNotEmpty) return images;
+      await cacheDir.delete(recursive: true);
+    }
+
+    // Download with progress tracking
+    _downloadingChapters.add(remotePath);
+    _downloadProgress[remotePath] = 0.0;
+    notifyListeners();
+
+    await cacheDir.create(recursive: true);
+    final cbzFile = File(FilePath.join(cacheDir.path, 'archive.cbz'));
+
+    try {
+      // Download with progress
+      await _client.downloadFile(
+        remotePath,
+        cbzFile.path,
+        onProgress: (received, total) {
+          if (total > 0) {
+            _downloadProgress[remotePath] = received / total;
+            notifyListeners();
+          }
+        },
+      );
+
+      _downloadProgress[remotePath] = 1.0;
+      notifyListeners();
+
+      // Extract
+      await CBZ.extractArchive(cbzFile, cacheDir);
+      await cbzFile.deleteIgnoreError();
+
+      final images = _listLocalImages(cacheDir);
+      if (images.isEmpty) throw Exception('No images found in archive');
+      return images;
+    } catch (e) {
+      await cacheDir.deleteIgnoreError(recursive: true);
+      rethrow;
+    } finally {
+      _downloadingChapters.remove(remotePath);
+      _downloadProgress.remove(remotePath);
+      notifyListeners();
+    }
+  }
+
+  /// Pre-download a chapter in the background.
+  void preDownloadChapter(String chapterPath) {
+    if (chapterPath.endsWith('.cbz') || chapterPath.endsWith('.zip')) {
+      if (isCbzCached(chapterPath)) return;
+      if (_downloadingChapters.contains(chapterPath)) return;
+      _downloadAndExtractCbz(chapterPath).catchError((e) {
+        Log.error("WebDavProvider", "Pre-download failed: $e");
+        return <String>[];
+      });
+    }
+  }
+
+  List<String> _listLocalImages(Directory dir) {
+    final imageExtensions = {
+      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'
+    };
+    final files = <File>[];
+    for (final entity in dir.listSync()) {
+      if (entity is File) {
+        final ext = _getExtension(entity.name).toLowerCase();
+        if (imageExtensions.contains(ext)) {
+          files.add(entity);
+        }
+      }
+    }
+    files.sort((a, b) => _naturalCompare(a.name, b.name));
+    return files.map((e) => 'file://${e.path}').toList();
+  }
+
+  static String _getExtension(String name) {
+    final dotIndex = name.lastIndexOf('.');
+    if (dotIndex < 0) return '';
+    return name.substring(dotIndex);
+  }
+
+  static int _naturalCompare(String a, String b) {
+    final aParts = _splitNatural(a);
+    final bParts = _splitNatural(b);
+    final minLen =
+        aParts.length < bParts.length ? aParts.length : bParts.length;
+    for (int i = 0; i < minLen; i++) {
+      final aIsNum = int.tryParse(aParts[i]) != null;
+      final bIsNum = int.tryParse(bParts[i]) != null;
+      if (aIsNum && bIsNum) {
+        final cmp = int.parse(aParts[i]).compareTo(int.parse(bParts[i]));
+        if (cmp != 0) return cmp;
+      } else {
+        final cmp = aParts[i].compareTo(bParts[i]);
+        if (cmp != 0) return cmp;
+      }
+    }
+    return aParts.length.compareTo(bParts.length);
+  }
+
+  static List<String> _splitNatural(String s) {
+    final parts = <String>[];
+    final buffer = StringBuffer();
+    bool? wasDigit;
+    for (int i = 0; i < s.length; i++) {
+      final isDigit = s[i].codeUnitAt(0) >= 48 && s[i].codeUnitAt(0) <= 57;
+      if (wasDigit != null && isDigit != wasDigit) {
+        parts.add(buffer.toString());
+        buffer.clear();
+      }
+      buffer.write(s[i]);
+      wasDigit = isDigit;
+    }
+    if (buffer.isNotEmpty) parts.add(buffer.toString());
+    return parts;
+  }
+
+  /// Load an image from WebDAV or streaming CBZ with caching.
+  Future<Uint8List> loadImage(String path) async {
+    // Handle stream:// protocol (from streaming CBZ)
+    if (path.startsWith('stream://')) {
+      return loadStreamImage(path);
+    }
+
+    final realPath =
+        path.startsWith('webdav://') ? path.substring(8) : path;
+    final cacheKey = 'webdav_img_$realPath';
+    final cached = await CacheManager().findCache(cacheKey);
+    if (cached != null) return cached.readAsBytes();
+    final data = await _client.readImage(realPath);
+    await CacheManager().writeCache(cacheKey, data, 30 * 24 * 60 * 60 * 1000);
+    return data;
+  }
+
+  /// List of entries for current browsing directory.
+  List<WebDavComicEntry>? _directoryEntries;
+  List<WebDavComicEntry>? get directoryEntries => _directoryEntries;
+
+  /// Load contents of a specific directory for browsing.
+  Future<void> loadDirectory(String path) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final client = getClient();
+      final items = await client.readDir(path);
+      final entries = <WebDavComicEntry>[];
+
+      for (final item in items) {
+        final name = item.name ?? '';
+        if (name.isEmpty || name == '.') continue;
+
+        final isDir = item.isDir == true;
+        final ext = _client.getExtension(name).toLowerCase();
+
+        if (isDir) {
+          // Check if this directory is a comic or a category
+          final isComic = await _isComicDirectory('$path$name/');
+          entries.add(WebDavComicEntry(
+            name: name,
+            path: '$path$name/',
+            isDirectory: true,
+            size: item.size ?? 0,
+            modified: item.mTime,
+            isCategory: !isComic,
+          ));
+        } else if (_client.isArchive(ext)) {
+          entries.add(WebDavComicEntry(
+            name: _client.cleanName(name),
+            path: '$path$name',
+            isDirectory: false,
+            size: item.size ?? 0,
+            modified: item.mTime,
+          ));
+        }
+      }
+
+      _directoryEntries = entries;
+    } catch (e) {
+      _error = e.toString();
+      _directoryEntries = null;
+      Log.error("WebDavProvider", "Failed to load directory: $e");
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Check if a directory contains comics (images or archives) directly.
+  Future<bool> _isComicDirectory(String path) async {
+    try {
+      final client = getClient();
+      final items = await client.readDir(path);
+      int imageCount = 0;
+      int archiveCount = 0;
+      int subDirCount = 0;
+
+      for (final item in items) {
+        final name = item.name ?? '';
+        if (name.isEmpty || name == '.') continue;
+        if (item.isDir == true) {
+          subDirCount++;
+        } else {
+          final ext = _client.getExtension(name).toLowerCase();
+          if (_client.isImage(ext)) imageCount++;
+          if (_client.isArchive(ext)) archiveCount++;
+        }
+      }
+
+      // It's a comic if it has images or archives
+      return imageCount > 0 || archiveCount > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> refresh() async {
+    _comics = null;
+    await loadComics(forceRefresh: true);
+  }
+
+  /// Load info.json from a comic directory (with caching).
+  Future<ComicInfo?> loadComicInfo(String comicPath) async {
+    final cacheKey = 'webdav_info_$comicPath';
+
+    // Check cache first
+    final cached = await CacheManager().findCache(cacheKey);
+    if (cached != null) {
+      try {
+        final content = await cached.readAsString();
+        final json = Map<String, dynamic>.from(
+          const JsonDecoder().convert(content) as Map,
+        );
+        return ComicInfo.fromJson(json);
+      } catch (_) {
+        // Cache corrupted, re-fetch
+      }
+    }
+
+    try {
+      final infoPath = '${comicPath}info.json';
+      final data = await _client.readImage(infoPath);
+
+      // Cache the raw JSON (30 days)
+      await CacheManager().writeCache(cacheKey, data, 30 * 24 * 60 * 60 * 1000);
+
+      final content = String.fromCharCodes(data);
+      final json = Map<String, dynamic>.from(
+        const JsonDecoder().convert(content) as Map,
+      );
+      return ComicInfo.fromJson(json);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> testConnection() async {
+    await _client.testConnection();
+  }
+}

@@ -19,6 +19,13 @@ class HistoryImageProvider
   @override
   Future<Uint8List> load(chunkEvents, checkStop) async {
     var url = history.cover;
+    // Handle file:// URLs directly
+    if (url.startsWith('file://')) {
+      var file = File(url.substring(7));
+      if (await file.exists()) {
+        return file.readAsBytes();
+      }
+    }
     if (!url.contains('/')) {
       var localComic = LocalManager().find(history.id, history.type);
       if (localComic != null) {

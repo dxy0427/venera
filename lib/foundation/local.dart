@@ -18,6 +18,48 @@ import 'package:venera/utils/background_download.dart';
 import 'app.dart';
 import 'history.dart';
 
+/// Natural sort that handles mixed text+number strings.
+/// E.g. "第2话" < "第12话", "001.jpg" < "002.jpg" < "100.jpg"
+int _naturalCompare(String a, String b) {
+  var ai = int.tryParse(a.split('.').first);
+  var bi = int.tryParse(b.split('.').first);
+  if (ai != null && bi != null) return ai.compareTo(bi);
+
+  final aParts = _splitNatural(a);
+  final bParts = _splitNatural(b);
+  final minLen =
+      aParts.length < bParts.length ? aParts.length : bParts.length;
+  for (int i = 0; i < minLen; i++) {
+    final aIsNum = int.tryParse(aParts[i]) != null;
+    final bIsNum = int.tryParse(bParts[i]) != null;
+    if (aIsNum && bIsNum) {
+      final cmp = int.parse(aParts[i]).compareTo(int.parse(bParts[i]));
+      if (cmp != 0) return cmp;
+    } else {
+      final cmp = aParts[i].compareTo(bParts[i]);
+      if (cmp != 0) return cmp;
+    }
+  }
+  return aParts.length.compareTo(bParts.length);
+}
+
+List<String> _splitNatural(String s) {
+  final parts = <String>[];
+  final buffer = StringBuffer();
+  bool? wasDigit;
+  for (int i = 0; i < s.length; i++) {
+    final isDigit = s[i].codeUnitAt(0) >= 48 && s[i].codeUnitAt(0) <= 57;
+    if (wasDigit != null && isDigit != wasDigit) {
+      parts.add(buffer.toString());
+      buffer.clear();
+    }
+    buffer.write(s[i]);
+    wasDigit = isDigit;
+  }
+  if (buffer.isNotEmpty) parts.add(buffer.toString());
+  return parts;
+}
+
 class LocalComic with HistoryMixin implements Comic {
   @override
   final String id;
@@ -453,14 +495,7 @@ class LocalManager with ChangeNotifier {
         files.add(entity);
       }
     }
-    files.sort((a, b) {
-      var ai = int.tryParse(a.name.split('.').first);
-      var bi = int.tryParse(b.name.split('.').first);
-      if (ai != null && bi != null) {
-        return ai.compareTo(bi);
-      }
-      return a.name.compareTo(b.name);
-    });
+    files.sort((a, b) => _naturalCompare(a.name, b.name));
     return files.map((e) => "file://${e.path}").toList();
   }
 

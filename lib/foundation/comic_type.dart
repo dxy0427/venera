@@ -11,16 +11,20 @@ class ComicType {
   @override
   int get hashCode => value.hashCode;
 
+  static const webdav = ComicType(-999);
+
   String get sourceKey {
     if (this == local) {
       return "local";
+    } else if (this == webdav) {
+      return "webdav";
     } else {
       return comicSource!.key;
     }
   }
 
   ComicSource? get comicSource {
-    if (this == local) {
+    if (this == local || this == webdav) {
       return null;
     } else {
       return ComicSource.fromIntKey(value);
@@ -32,6 +36,8 @@ class ComicType {
   factory ComicType.fromKey(String key) {
     if (key == "local") {
       return local;
+    } else if (key == "webdav") {
+      return webdav;
     } else {
       return ComicType(key.hashCode);
     }

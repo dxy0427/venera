@@ -16,6 +16,8 @@ import 'package:venera/foundation/read_later.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/comic_archive_page.dart';
 import 'package:venera/pages/comic_source_page.dart';
+import 'package:venera/pages/webdav_comics/webdav_comics_page.dart';
+import 'package:venera/pages/webdav_comics/webdav_settings_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/pages/history_page.dart';
@@ -45,6 +47,7 @@ class HomePage extends StatelessWidget {
         const _Local(),
         const FollowUpdatesWidget(),
         const _ComicSourceWidget(),
+        const _WebDavComicsWidget(),
         const ImageFavorites(),
         const _ComicArchiveWidget(),
         SliverPadding(padding: EdgeInsets.only(top: context.padding.bottom)),
@@ -476,6 +479,93 @@ class _LocalState extends State<_Local> {
       builder: (context) {
         return const _ImportComicsWidget();
       },
+    );
+  }
+}
+
+class _WebDavComicsWidget extends StatefulWidget {
+  const _WebDavComicsWidget();
+
+  @override
+  State<_WebDavComicsWidget> createState() => _WebDavComicsWidgetState();
+}
+
+class _WebDavComicsWidgetState extends State<_WebDavComicsWidget> {
+  bool _isConfigured = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConfig();
+  }
+
+  void _checkConfig() {
+    final config = appdata.settings['webdavComicSource'];
+    setState(() {
+      _isConfigured = config is List &&
+          config.whereType<String>().length == 3 &&
+          config.whereType<String>().first.trim().isNotEmpty;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverToBoxAdapter(
+      child: HomeSectionCard(
+        title: 'WebDAV Comics'.tl,
+        count: null,
+        onTap: () {
+          if (_isConfigured) {
+            context
+                .to(() => const WebDavComicsPage())
+                .then((_) => _checkConfig());
+          } else {
+            context
+                .to(() => const WebDavSettingsPage())
+                .then((_) => _checkConfig());
+          }
+        },
+        content: _isConfigured
+            ? Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_outlined),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Browse comics from WebDAV server'.tl,
+                        style: ts.s14,
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+              )
+            : null,
+        actions: Row(
+          children: [
+            const Spacer(),
+            Button.outlined(
+              onPressed: () {
+                context
+                    .to(() => const WebDavSettingsPage())
+                    .then((_) => _checkConfig());
+              },
+              child: Row(
+                children: [
+                  const Icon(Icons.settings, size: 16),
+                  const SizedBox(width: 4),
+                  Text('Configure'.tl),
+                ],
+              ),
+            ),
+          ],
+        ).paddingHorizontal(AppSpace.lg).paddingVertical(AppSpace.sm),
+      ),
     );
   }
 }
