@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
+import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/utils/translations.dart';
 import 'package:webdav_client/webdav_client.dart' as webdav;
@@ -291,7 +292,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                       const SizedBox(height: 8),
                       Text(
                         'Supported formats:'.tl,
-                        style: ts.s14.withBold,
+                        style: ts.s14.bold,
                       ),
                       Text(
                         '• Directory with image files (jpg, png, webp, etc.)\n'
@@ -313,7 +314,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
   Widget _buildSectionHeader(String title) {
     return Text(
       title,
-      style: ts.s18.withBold.withColor(context.colorScheme.primary),
+      style: ts.s18.bold.withColor(context.colorScheme.primary),
     );
   }
 

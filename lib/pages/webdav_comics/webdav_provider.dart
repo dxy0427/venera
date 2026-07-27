@@ -50,10 +50,11 @@ class WebDavProvider with ChangeNotifier {
       return;
     }
 
-    if (!forceRefresh && _comics != null) return;
+    if (!forceRefresh && _comics != null && _directoryEntries == null) return;
 
     _isLoading = true;
     _error = null;
+    _directoryEntries = null;
     notifyListeners();
 
     try {
@@ -190,7 +191,7 @@ class WebDavProvider with ChangeNotifier {
 
       // Return stream:// paths
       return imageEntries
-          .map((e) => 'stream://${remotePath}/${e.fileName}')
+          .map((e) => 'stream://${remotePath}::${e.fileName}')
           .toList();
     } catch (e) {
       reader.dispose();
@@ -203,11 +204,14 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load a single image from a streaming CBZ entry.
   Future<Uint8List> loadStreamImage(String streamPath) async {
-    // streamPath format: stream://remotePath/entryFileName
+    // streamPath format: stream://remotePath::entryFileName
     final withoutProtocol = streamPath.substring(9); // remove 'stream://'
-    final firstSlash = withoutProtocol.indexOf('/');
-    final remotePath = withoutProtocol.substring(0, firstSlash);
-    final entryName = withoutProtocol.substring(firstSlash + 1);
+    final sep = withoutProtocol.indexOf('::');
+    if (sep < 0) {
+      throw Exception('Invalid stream path: $streamPath');
+    }
+    final remotePath = withoutProtocol.substring(0, sep);
+    final entryName = withoutProtocol.substring(sep + 2);
 
     // Check image cache
     final cacheKey = 'webdav_stream_$remotePath/$entryName';
@@ -348,6 +352,10 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load an image from WebDAV or streaming CBZ with caching.
   Future<Uint8List> loadImage(String path) async {
+    // Local extracted images
+    if (path.startsWith('file://')) {
+      return File(path.substring(7)).readAsBytes();
+    }
     // Handle stream:// protocol (from streaming CBZ)
     if (path.startsWith('stream://')) {
       return loadStreamImage(path);
@@ -374,7 +382,7 @@ class WebDavProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final client = getClient();
+      final client = _client.getClient();
       final items = await client.readDir(path);
       final entries = <WebDavComicEntry>[];
 
@@ -421,7 +429,7 @@ class WebDavProvider with ChangeNotifier {
   /// Check if a directory contains comics (images or archives) directly.
   Future<bool> _isComicDirectory(String path) async {
     try {
-      final client = getClient();
+      final client = _client.getClient();
       final items = await client.readDir(path);
       int imageCount = 0;
       int archiveCount = 0;
@@ -490,3 +498,14 @@ class WebDavProvider with ChangeNotifier {
     await _client.testConnection();
   }
 }
+
+class _StreamInfo {
+  final StreamingZipReader reader;
+  final List<ZipEntryInfo> entries;
+
+  _StreamInfo({
+    required this.reader,
+    required this.entries,
+  });
+}
+

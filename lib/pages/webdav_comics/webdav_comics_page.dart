@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
@@ -298,11 +299,11 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
   }
 
   void _openComic(WebDavComicEntry comic) {
-    if (comic.isDirectory) {
-      // Navigate into directory (could be category or comic)
+    if (comic.isDirectory && comic.isCategory) {
+      // Category folder - navigate into it
       _navigateTo(comic.path, comic.name);
     } else {
-      // Archive file - open detail page
+      // Comic directory or archive file - open detail page
       context.to(() => WebDavComicDetailPage(comic: comic));
     }
   }
@@ -336,7 +337,7 @@ class _WebDavComicCard extends StatelessWidget {
                     comic.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: ts.s14.withBold,
+                    style: ts.s14.bold,
                   ),
                   if (comic.imageCount != null)
                     Text(
@@ -479,53 +480,7 @@ class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
               _FavoriteButton(comic: widget.comic),
             ],
           ),
-          // Breadcrumb
-          if (_breadcrumbs.isNotEmpty)
-            SliverToBoxAdapter(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: _navigateToRoot,
-                      child: Icon(Icons.home, size: 16,
-                          color: context.colorScheme.primary),
-                    ),
-                    for (int i = 0; i < _breadcrumbs.length; i++) ...[
-                      const Icon(Icons.chevron_right, size: 16),
-                      GestureDetector(
-                        onTap: () {
-                          // Navigate to this breadcrumb level
-                          while (_breadcrumbs.length > i + 1) {
-                            _breadcrumbs.removeLast();
-                          }
-                          final seg = _breadcrumbs.removeLast();
-                          setState(() {
-                            _currentPath = seg.path.isEmpty ? null : seg.path;
-                          });
-                          if (_currentPath == null) {
-                            WebDavProvider().loadComics(forceRefresh: true);
-                          } else {
-                            WebDavProvider().loadDirectory(_currentPath!);
-                          }
-                        },
-                        child: Text(
-                          _breadcrumbs[i].name,
-                          style: ts.s12.copyWith(
-                            color: context.colorScheme.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                    const Icon(Icons.chevron_right, size: 16),
-                    Text(
-                      _currentPath?.split('/').where((s) => s.isNotEmpty).last ?? 'Root',
-                      style: ts.s12.withBold,
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          if (_loading)
             const SliverFillRemaining(
               child: Center(child: CircularProgressIndicator()),
             )
@@ -603,7 +558,7 @@ class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
                     const SizedBox(width: 8),
                     Text(
                       info.stars!.toStringAsFixed(1),
-                      style: ts.s14.withBold,
+                      style: ts.s14.bold,
                     ),
                   ],
                 ),
@@ -633,7 +588,7 @@ class WebDavComicDetailPageState extends State<WebDavComicDetailPage> {
                       ),
                       child: Text(
                         entry.key,
-                        style: ts.s12.withBold.withColor(
+                        style: ts.s12.bold.withColor(
                           context.colorScheme.onPrimaryContainer,
                         ),
                       ),
@@ -901,17 +856,23 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
   }
 
   void _toggle() {
+    final folders = LocalFavoritesManager().folderNames;
+    if (folders.isEmpty) {
+      context.showMessage(message: 'No favorite folder'.tl);
+      return;
+    }
+    final folder = folders.first;
     setState(() {
       if (_isFavorite) {
         LocalFavoritesManager().deleteComicWithId(
-          LocalFavoritesManager().folderNames.first,
+          folder,
           widget.comic.path,
           ComicType.webdav,
         );
         _isFavorite = false;
       } else {
         LocalFavoritesManager().addComic(
-          LocalFavoritesManager().folderNames.first,
+          folder,
           FavoriteItem(
             id: widget.comic.path,
             name: widget.comic.name,

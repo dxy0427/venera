@@ -16,6 +16,7 @@ import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/image_provider/cached_image.dart';
+import 'package:venera/foundation/image_provider/local_comic_image.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/pages/webdav_comics/comic_info.dart';
@@ -1181,7 +1182,7 @@ class _LocalComicDetailPage extends StatelessWidget {
             child: SizedBox(
               height: 280,
               child: Image(
-                image: LocalComicImage(comic.id, comic.comicType),
+                image: LocalComicImageProvider(comic),
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => const Center(
                   child: Icon(Icons.broken_image, size: 48),
@@ -1227,7 +1228,7 @@ class _LocalComicDetailPage extends StatelessWidget {
                           const SizedBox(width: 8),
                           Text(
                             info.stars!.toStringAsFixed(1),
-                            style: ts.s14.withBold,
+                            style: ts.s14.bold,
                           ),
                         ],
                       ),
@@ -1255,7 +1256,7 @@ class _LocalComicDetailPage extends StatelessWidget {
                             ),
                             child: Text(
                               entry.key,
-                              style: ts.s12.withBold.withColor(
+                              style: ts.s12.bold.withColor(
                                 context.colorScheme.onPrimaryContainer,
                               ),
                             ),
@@ -1303,7 +1304,7 @@ class _LocalComicDetailPage extends StatelessWidget {
                   if (comic.chapters != null) ...[
                     const SizedBox(height: 16),
                     const Divider(),
-                    Text('Chapters'.tl, style: ts.s16.withBold),
+                    Text('Chapters'.tl, style: ts.s16.bold),
                     const SizedBox(height: 8),
                   ],
                 ],

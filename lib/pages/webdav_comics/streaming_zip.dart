@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:venera/foundation/log.dart';
@@ -203,21 +204,12 @@ class StreamingZipReader {
   }
 
   Uint8List _inflateRaw(Uint8List compressed) {
-    // Add zlib header for raw deflate data
-    final zlibData = Uint8List(compressed.length + 6);
-    zlibData[0] = 0x78; // CMF
-    zlibData[1] = 0x01; // FLG
-    zlibData.setRange(2, zlibData.length - 4, compressed);
-    // Add Adler-32 checksum (simplified - just use 0 for now)
-    zlibData[2 + compressed.length] = 0;
-    zlibData[3 + compressed.length] = 0;
-    zlibData[4 + compressed.length] = 0;
-    zlibData[5 + compressed.length] = 0;
-
+    // ZIP method 8 is raw deflate (no zlib wrapper).
     try {
-      return Uint8List.fromList(zlib.decode(zlibData));
-    } catch (e) {
-      // If zlib header doesn't work, try without it
+      return Uint8List.fromList(
+        const ZLibCodec(raw: true).decode(compressed),
+      );
+    } catch (_) {
       return Uint8List.fromList(zlib.decode(compressed));
     }
   }

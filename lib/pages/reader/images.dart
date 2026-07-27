@@ -1355,8 +1355,10 @@ ImageProvider _createImageProviderFromKey(
   int page,
 ) {
   var reader = context.reader;
-  // Handle WebDAV image keys
-  if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+  // Handle WebDAV / streaming / extracted local image keys
+  if (imageKey.startsWith('webdav://') ||
+      imageKey.startsWith('stream://') ||
+      (reader.type == ComicType.webdav && imageKey.startsWith('file://'))) {
     return WebDavReaderImageProvider(
       imageKey,
       page: page,

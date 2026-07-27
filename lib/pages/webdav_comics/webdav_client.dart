@@ -133,13 +133,15 @@ class WebDavComicClient {
         final ext = _getExtension(name).toLowerCase();
 
         if (isDir) {
-          // Directory - likely a comic folder
+          final dirPath = '$remotePath$name/';
+          final isComic = await _isComicDirectory(dirPath);
           entries.add(WebDavComicEntry(
             name: _cleanName(name),
-            path: '$remotePath$name/',
+            path: dirPath,
             isDirectory: true,
             size: item.size ?? 0,
             modified: item.mTime,
+            isCategory: !isComic,
           ));
         } else if (_archiveExtensions.contains(ext)) {
           // Archive file - cbz/zip comic
@@ -365,6 +367,27 @@ class WebDavComicClient {
       }
     } catch (_) {}
     return false;
+  }
+
+  /// Whether a directory looks like a comic (has images or archives).
+  Future<bool> _isComicDirectory(String path) async {
+    try {
+      final client = getClient();
+      final items = await client.readDir(path);
+      int imageCount = 0;
+      int archiveCount = 0;
+      for (final item in items) {
+        final name = item.name ?? '';
+        if (name.isEmpty || name == '.') continue;
+        if (item.isDir == true) continue;
+        final ext = _getExtension(name).toLowerCase();
+        if (_imageExtensions.contains(ext)) imageCount++;
+        if (_archiveExtensions.contains(ext)) archiveCount++;
+      }
+      return imageCount > 0 || archiveCount > 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// List CBZ/ZIP files in a directory (for chapter-based comics).
