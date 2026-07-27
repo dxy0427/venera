@@ -5,6 +5,7 @@ import 'package:flutter_qjs/flutter_qjs.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
+import 'package:venera/pages/webdav_comics/webdav_provider.dart';
 import 'package:venera/utils/image.dart';
 
 import 'app_dio.dart';
@@ -25,6 +26,21 @@ abstract class ImageDownloader {
         totalBytes: data.length,
         imageBytes: data,
       );
+      return;
+    }
+
+    if (sourceKey == 'webdav' ||
+        url.startsWith('webdav://') ||
+        url.startsWith('stream://') ||
+        url.startsWith('file://')) {
+      final bytes = await _loadWebDavImageBytes(url);
+      await CacheManager().writeCache(cacheKey, bytes);
+      yield ImageDownloadProgress(
+        currentBytes: bytes.length,
+        totalBytes: bytes.length,
+        imageBytes: bytes,
+      );
+      return;
     }
 
     var configs = <String, dynamic>{};
@@ -153,6 +169,27 @@ abstract class ImageDownloader {
         imageBytes: data,
       );
       return;
+    }
+
+    // WebDAV / streaming / extracted local images
+    if (sourceKey == 'webdav' ||
+        imageKey.startsWith('webdav://') ||
+        imageKey.startsWith('stream://') ||
+        imageKey.startsWith('file://')) {
+      try {
+        // Lazy import path via ComicSource image config is not used;
+        // load through WebDav provider when available.
+        final bytes = await _loadWebDavImageBytes(imageKey);
+        await CacheManager().writeCache(cacheKey, bytes);
+        yield ImageDownloadProgress(
+          currentBytes: bytes.length,
+          totalBytes: bytes.length,
+          imageBytes: bytes,
+        );
+        return;
+      } catch (e) {
+        throw "WebDAV image load failed: $e";
+      }
     }
 
     Future<Map<String, dynamic>?> Function()? onLoadFailed;
@@ -333,6 +370,10 @@ class _StreamWrapper<T> {
     controllers.clear();
     isClosed = true;
   }
+}
+
+Future<Uint8List> _loadWebDavImageBytes(String imageKey) async {
+  return WebDavProvider().loadImage(imageKey);
 }
 
 class ImageDownloadProgress {

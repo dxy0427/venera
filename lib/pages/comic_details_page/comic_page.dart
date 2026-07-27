@@ -20,8 +20,7 @@ import 'package:venera/foundation/image_provider/local_comic_image.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/pages/webdav_comics/comic_info.dart';
-import 'package:venera/pages/webdav_comics/webdav_comics_page.dart';
-import 'package:venera/pages/webdav_comics/webdav_models.dart';
+import 'package:venera/pages/webdav_comics/webdav_image_provider.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/network/cache.dart';
@@ -275,28 +274,6 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       await Future.delayed(const Duration(milliseconds: 200));
       return const Res.error('Local comic');
     }
-    if (widget.sourceKey == 'webdav') {
-      // WebDAV comic - show detail page
-      if (isFirst) {
-        Future.microtask(() {
-          if (!App.rootContext.mounted) return;
-          // Build a WebDavComicEntry from the stored info
-          final path = widget.id;
-          final name = widget.title ??
-              path.split('/').where((s) => s.isNotEmpty).last;
-          final entry = WebDavComicEntry(
-            name: name,
-            path: path,
-            isDirectory: path.endsWith('/'),
-          );
-          App.rootContext.to(() => WebDavComicDetailPage(comic: entry));
-          App.mainNavigatorKey!.currentContext!.pop();
-        });
-        isFirst = false;
-      }
-      await Future.delayed(const Duration(milliseconds: 200));
-      return const Res.error('WebDAV comic');
-    }
     var comicSource = ComicSource.find(widget.sourceKey);
     if (comicSource == null) {
       return const Res.error('Comic source not found');
@@ -331,6 +308,19 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     if (comic.chapters == null) {
       isDownloaded = LocalManager().isDownloaded(comic.id, comic.comicType, 0);
     }
+  }
+
+  ImageProvider _coverImageProvider(String cover, String sourceKey, String cid) {
+    if (sourceKey == 'webdav' ||
+        cover.startsWith('webdav://') ||
+        cover.startsWith('stream://') ||
+        cover.startsWith('file://')) {
+      if (cover.startsWith('file://')) {
+        return FileImage(File(cover.substring(7)));
+      }
+      return WebDavImageProvider(cover.isEmpty ? cid : cover);
+    }
+    return CachedImageProvider(cover, sourceKey: sourceKey, cid: cid);
   }
 
   Iterable<Widget> buildTitle() sync* {
@@ -376,10 +366,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                 width: 144 * 0.72,
                 clipBehavior: Clip.antiAlias,
                 child: AnimatedImage(
-                  image: CachedImageProvider(
+                  image: _coverImageProvider(
                     widget.cover ?? comic.cover,
-                    sourceKey: comic.sourceKey,
-                    cid: comic.id,
+                    comic.sourceKey,
+                    comic.id,
                   ),
                   width: double.infinity,
                   height: double.infinity,
@@ -399,7 +389,8 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                     style: ts.s14,
                   ).paddingVertical(4),
                 Text(
-                  (ComicSource.find(comic.sourceKey)?.name) ?? '',
+                  (ComicSource.find(comic.sourceKey)?.name) ??
+                      (comic.sourceKey == 'webdav' ? 'WebDAV' : ''),
                   style: ts.s12,
                 ),
               ],
@@ -434,7 +425,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                   onPressed: read,
                   iconColor: context.useTextColor(Colors.orange),
                 ),
-              if (!isMobile && !isDownloaded)
+              if (!isMobile && !isDownloaded && comicSource.loadComicPages != null)
                 _ActionButton(
                   icon: const Icon(Icons.download),
                   text: 'Download'.tl,
@@ -503,13 +494,15 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
           if (isMobile)
             Row(
               children: [
-                Expanded(
-                  child: FilledButton.tonal(
-                    onPressed: download,
-                    child: Text("Download".tl),
+                if (comicSource.loadComicPages != null) ...[
+                  Expanded(
+                    child: FilledButton.tonal(
+                      onPressed: download,
+                      child: Text("Download".tl),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
+                  const SizedBox(width: 16),
+                ],
                 Expanded(
                   child: hasHistory
                       ? FilledButton(
@@ -809,10 +802,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   }
 
   void _viewCover(BuildContext context) {
-    final imageProvider = CachedImageProvider(
+    final imageProvider = _coverImageProvider(
       widget.cover ?? comic.cover,
-      sourceKey: comic.sourceKey,
-      cid: comic.id,
+      comic.sourceKey,
+      comic.id,
     );
 
     context.to(
@@ -826,10 +819,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
 
   void _saveCover(BuildContext context) async {
     try {
-      final imageProvider = CachedImageProvider(
+      final imageProvider = _coverImageProvider(
         widget.cover ?? comic.cover,
-        sourceKey: comic.sourceKey,
-        cid: comic.id,
+        comic.sourceKey,
+        comic.id,
       );
 
       final imageStream = imageProvider.resolve(const ImageConfiguration());
@@ -1122,8 +1115,18 @@ class _ComicPageLoadingPlaceHolder extends StatelessWidget {
   Widget buildImage(BuildContext context) {
     Widget child;
     if (cover != null) {
+      final ImageProvider image;
+      if (sourceKey == 'webdav' ||
+          cover!.startsWith('webdav://') ||
+          cover!.startsWith('file://')) {
+        image = cover!.startsWith('file://')
+            ? FileImage(File(cover!.substring(7)))
+            : WebDavImageProvider(cover!);
+      } else {
+        image = CachedImageProvider(cover!, sourceKey: sourceKey, cid: cid);
+      }
       child = AnimatedImage(
-        image: CachedImageProvider(cover!, sourceKey: sourceKey, cid: cid),
+        image: image,
         width: double.infinity,
         height: double.infinity,
         fit: BoxFit.cover,

@@ -41,7 +41,11 @@ class _FavoritePanelState extends State<_FavoritePanel>
 
   @override
   void initState() {
-    comicSource = widget.type.comicSource!;
+    // Built-in / special sources may still have a ComicSource (e.g. webdav).
+    // Fall back carefully when comicSource is null (local only).
+    comicSource = widget.type.comicSource ??
+        ComicSource.find(widget.type.sourceKey) ??
+        (throw StateError('Comic source not found for ${widget.type.sourceKey}'));
     localFolders = LocalFavoritesManager().folderNames;
     added = LocalFavoritesManager().find(widget.cid, widget.type);
     hasNetwork = comicSource.favoriteData != null && comicSource.isLogged;

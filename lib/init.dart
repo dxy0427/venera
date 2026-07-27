@@ -20,6 +20,7 @@ import 'package:venera/utils/handle_text_share.dart';
 import 'package:venera/utils/opencc.dart';
 import 'package:venera/utils/tags_translation.dart';
 import 'package:venera/utils/translations.dart';
+import 'package:venera/pages/webdav_comics/webdav_builtin_source.dart';
 import 'foundation/appdata.dart';
 
 extension _FutureInit<T> on Future<T> {
@@ -53,6 +54,12 @@ Future<void> init() async {
     await Future.wait(futures);
   } catch (e, s) {
     Log.error("init", "$e\n$s");
+  }
+  try {
+    ComicSourceManager.setBuiltinRegister(WebDavBuiltinSource.register);
+    WebDavBuiltinSource.register();
+  } catch (e, s) {
+    Log.error("init", "WebDAV source register failed: $e\n$s");
   }
   CacheManager().setLimitSize(appdata.settings['cacheSize']);
   _checkOldConfigs();

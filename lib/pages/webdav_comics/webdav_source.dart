@@ -1,24 +1,26 @@
 /// WebDAV Comics Source Module
 ///
-/// Provides the ability to browse and read comics directly from a WebDAV server
-/// without downloading them to local storage first.
+/// Built-in native comic source (not a JS config). Registered at app init as
+/// [WebDavBuiltinSource] so it appears in Explore / Comic Sources and uses the
+/// standard [ComicPage] detail UI.
 ///
 /// Features:
 /// - Browse comic directories on WebDAV server
-/// - Stream images on-demand during reading
-/// - Cache loaded images for smooth re-reading
-/// - Support directory-based comics and chapter subdirectories
-/// - Natural sorting of files and chapters
+/// - Stream images on-demand during reading (Range for CBZ)
+/// - Cache loaded images
+/// - Directory comics + chapter subdirectories + archives
 ///
 /// Architecture:
-/// - [WebDavComicClient] - Low-level WebDAV API operations
-/// - [WebDavProvider] - State management and caching layer
-/// - [WebDavImageProvider] - Flutter ImageProvider for streaming
-/// - [WebDavComicsPage] - Browse UI
-/// - [WebDavSettingsPage] - Configuration UI
+/// - [WebDavBuiltinSource] - ComicSource adapter (loadInfo / loadEp / explore)
+/// - [WebDavComicClient] - WebDAV API
+/// - [WebDavProvider] - state + streaming + cache
+/// - [WebDavImageProvider] - ImageProvider
+/// - [WebDavComicsPage] - directory browser
+/// - [WebDavSettingsPage] - server config
 
 library webdav_comics;
 
+export 'webdav_builtin_source.dart';
 export 'webdav_client.dart';
 export 'webdav_comics_page.dart';
 export 'webdav_image_provider.dart';

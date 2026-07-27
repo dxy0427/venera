@@ -53,48 +53,9 @@ class _ReaderImagesState extends State<_ReaderImages> {
     }
   }
 
-  /// Whether the current reader is for a WebDAV comic.
-  bool get _isWebDav => reader.type == ComicType.webdav;
-
   void load() async {
     if (inProgress) return;
     inProgress = true;
-
-    // Handle WebDAV comics (stream-first, no full download prefetch)
-    if (_isWebDav) {
-      try {
-        final provider = WebDavProvider();
-        List<String> images;
-        if (reader.widget.chapters != null) {
-          // Chapter id is the remote path (see WebDavComicDetailPage)
-          final chapterPath = reader.eid;
-          images = await provider.getChapterImages(chapterPath);
-        } else {
-          images = await provider.getComicImages(reader.cid);
-        }
-
-        if (!mounted) return;
-        setState(() {
-          reader.images = images;
-          reader.isLoading = false;
-          inProgress = false;
-          _handleJumpToLastPage();
-          Future.microtask(() {
-            reader.updateHistory();
-          });
-        });
-      } catch (e) {
-        if (!mounted) return;
-        setState(() {
-          error = e.toString();
-          reader.isLoading = false;
-          inProgress = false;
-        });
-      }
-      if (!mounted) return;
-      context.readerScaffold.update();
-      return;
-    }
 
     if (reader.type == ComicType.local ||
         (LocalManager().isDownloaded(

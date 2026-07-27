@@ -88,7 +88,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   String get id => comicId;
 
   @override
-  ComicType get comicType => ComicType(source.key.hashCode);
+  ComicType get comicType => ComicType.fromKey(source.key);
 
   String? comicTitle;
 
@@ -412,7 +412,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       if (chapters == null || chapters!.contains(completedChapterId)) {
         await LocalManager().markChapterDownloaded(
           comicId,
-          ComicType(source.key.hashCode),
+          ComicType.fromKey(source.key),
           completedChapterId,
           comicBuilder: toLocalComic,
         );
@@ -511,7 +511,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       directory: Directory(path!).name,
       chapters: comic!.chapters,
       cover: File(_cover!.split("file://").last).name,
-      comicType: ComicType(source.key.hashCode),
+      comicType: ComicType.fromKey(source.key),
       downloadedChapters: chapters ?? comic?.chapters?.ids.toList() ?? [],
       createdAt: DateTime.now(),
     );
@@ -715,7 +715,7 @@ class ArchiveDownloadTask extends DownloadTask {
   }
 
   @override
-  ComicType get comicType => ComicType(source.key.hashCode);
+  ComicType get comicType => ComicType.fromKey(source.key);
 
   @override
   String? get cover => comic.cover;
@@ -892,7 +892,7 @@ class ArchiveDownloadTask extends DownloadTask {
       directory: Directory(path!).name,
       chapters: null,
       cover: _findCover(),
-      comicType: ComicType(source.key.hashCode),
+      comicType: ComicType.fromKey(source.key),
       downloadedChapters: [],
       createdAt: DateTime.now(),
     );

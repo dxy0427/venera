@@ -77,7 +77,21 @@ class ComicSourceManager with ChangeNotifier, Init {
     _sources.clear();
     JsEngine().runCode("ComicSource.sources = {};");
     await doInit();
+    // Re-register built-in native sources after JS reload
+    try {
+      // Lazy to avoid import cycle at library load
+      // ignore: avoid_dynamic_calls
+      final register = _webdavRegister;
+      register?.call();
+    } catch (_) {}
     notifyListeners();
+  }
+
+  /// Hook for built-in sources (set from app init).
+  static void Function()? _webdavRegister;
+
+  static void setBuiltinRegister(void Function() register) {
+    _webdavRegister = register;
   }
 
   void add(ComicSource source) {

@@ -249,12 +249,12 @@ class ComicDetails with HistoryMixin {
   }
 
   @override
-  HistoryType get historyType => HistoryType(sourceKey.hashCode);
+  HistoryType get historyType => ComicType.fromKey(sourceKey);
 
   @override
   String get id => comicId;
 
-  ComicType get comicType => ComicType(sourceKey.hashCode);
+  ComicType get comicType => ComicType.fromKey(sourceKey);
 
   /// Convert tags map to plain list
   List<String> get plainTags {

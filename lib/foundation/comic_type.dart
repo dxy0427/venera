@@ -24,8 +24,10 @@ class ComicType {
   }
 
   ComicSource? get comicSource {
-    if (this == local || this == webdav) {
+    if (this == local) {
       return null;
+    } else if (this == webdav) {
+      return ComicSource.find("webdav");
     } else {
       return ComicSource.fromIntKey(value);
     }

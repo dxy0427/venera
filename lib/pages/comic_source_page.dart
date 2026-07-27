@@ -177,6 +177,12 @@ class _BodyState extends State<_Body> {
   }
 
   void delete(ComicSource source) {
+    if (source.filePath.startsWith('builtin:')) {
+      App.rootContext.showMessage(
+        message: "Built-in source cannot be deleted".tl,
+      );
+      return;
+    }
     showConfirmDialog(
       context: App.rootContext,
       title: "Delete".tl,
