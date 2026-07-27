@@ -207,7 +207,7 @@ class StreamingZipReader {
     // ZIP method 8 is raw deflate (no zlib wrapper).
     try {
       return Uint8List.fromList(
-        const ZLibCodec(raw: true).decode(compressed),
+        ZLibCodec(raw: true).decode(compressed),
       );
     } catch (_) {
       return Uint8List.fromList(zlib.decode(compressed));
