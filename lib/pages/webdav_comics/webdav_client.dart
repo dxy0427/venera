@@ -6,6 +6,7 @@ import 'package:webdav_client/webdav_client.dart' as webdav;
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
+import 'package:venera/utils/io.dart';
 
 import 'webdav_models.dart';
 import 'streaming_zip.dart';
@@ -337,10 +338,15 @@ class WebDavComicClient {
   Future<Uint8List> readImage(String path) async {
     final client = getClient();
     try {
-      final data = await client.read(path);
-      if (data is Uint8List) return data;
-      if (data is List<int>) return Uint8List.fromList(data);
-      throw Exception('Unexpected data type: ${data.runtimeType}');
+      // Download to temp file, then read
+      final tempDir = Directory.systemTemp;
+      final tempFile = File(
+        '${tempDir.path}/webdav_temp_${DateTime.now().microsecondsSinceEpoch}',
+      );
+      await client.read2File(path, tempFile.path);
+      final data = await tempFile.readAsBytes();
+      await tempFile.deleteIgnoreError();
+      return data;
     } catch (e, s) {
       Log.error("WebDavClient", "Failed to read image $path: $e\n$s");
       rethrow;
