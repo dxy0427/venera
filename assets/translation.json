@@ -578,15 +578,7 @@
     "Testing...": "测试中...",
     "Save": "保存",
     "Connection Settings": "连接设置",
-    "Directory does not exist": "目录不存在",
-    "Directory is not empty. Choose an empty folder (hidden files like .nomedia are OK).": "目录非空。请选择空文件夹（.nomedia 等隐藏文件可忽略）",
-    "No write permission for the selected directory": "所选目录没有写入权限。请用系统文件选择器重新选择该文件夹。",
-    "Path set successfully": "路径设置成功",
-    "Path set successfully. Non-empty folder → used @p": "路径设置成功。所选目录非空，已使用 @p",
-    "About storage location": "关于存储位置",
-    "Reset to Default Storage Path": "恢复默认存储路径",
-    "No write permission for the selected directory. On Android, pick the folder with the system file picker (e.g. Download/venera). Full storage permission is not required.": "所选目录没有写入权限。请用系统文件选择器选中文件夹（例如 Download/venera）。一般不需要开启「所有文件访问」全盘权限。",
-    "Default path is app private storage (no extra permission). To use public folders such as Download (e.g. Download/venera), tap Set and pick that folder in the system file picker. Only that folder is authorized — full phone storage access is not required. The folder may be empty or already contain comic folders.": "默认路径是应用私有目录（不需要额外权限）。若要用 Download 等公共目录（例如 Download/venera）：点「设置」后在系统文件选择器中选中该文件夹即可，只需授权该文件夹，不需要「所有文件访问」全盘权限。文件夹可以为空，也可以里面已有漫画子文件夹。"
+    "Path set successfully": "路径设置成功"
   },
   "zh_TW": {
     "Home": "首頁",
@@ -1167,14 +1159,6 @@
     "Testing...": "測試中...",
     "Save": "儲存",
     "Connection Settings": "連線設定",
-    "Directory does not exist": "目錄不存在",
-    "Directory is not empty. Choose an empty folder (hidden files like .nomedia are OK).": "目錄非空。請選擇空資料夾（.nomedia 等隱藏檔可忽略）",
-    "No write permission for the selected directory": "所選目錄沒有寫入權限。請用系統檔案選擇器重新選擇該資料夾。",
-    "Path set successfully": "路徑設定成功",
-    "Path set successfully. Non-empty folder → used @p": "路徑設定成功。所選目錄非空，已使用 @p",
-    "About storage location": "關於儲存位置",
-    "Reset to Default Storage Path": "恢復預設儲存路徑",
-    "No write permission for the selected directory. On Android, pick the folder with the system file picker (e.g. Download/venera). Full storage permission is not required.": "所選目錄沒有寫入權限。請用系統檔案選擇器選取資料夾（例如 Download/venera）。一般不需要開啟「所有檔案存取」全盤權限。",
-    "Default path is app private storage (no extra permission). To use public folders such as Download (e.g. Download/venera), tap Set and pick that folder in the system file picker. Only that folder is authorized — full phone storage access is not required. The folder may be empty or already contain comic folders.": "預設路徑是應用私有目錄（不需要額外權限）。若要用 Download 等公共目錄（例如 Download/venera）：點「設置」後在系統檔案選擇器中選取該資料夾即可，只需授權該資料夾，不需要「所有檔案存取」全盤權限。資料夾可以為空，也可以裡面已有漫畫子資料夾。"
+    "Path set successfully": "路徑設定成功"
   }
 }
