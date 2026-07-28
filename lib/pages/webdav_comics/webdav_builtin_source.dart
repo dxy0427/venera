@@ -3,6 +3,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/utils/translations.dart';
 
+import 'comic_info.dart';
 import 'webdav_client.dart';
 import 'webdav_models.dart';
 import 'webdav_provider.dart';
@@ -15,7 +16,11 @@ class WebDavBuiltinSource {
   WebDavBuiltinSource._();
 
   static const key = 'webdav';
+
+  /// English base name; UI should use `.tl` / source [translations].
   static const name = 'WebDAV';
+
+  static const exploreTitle = 'WebDAV Comics';
 
   static ComicSource create() {
     return ComicSource(
@@ -27,7 +32,7 @@ class WebDavBuiltinSource {
       null, // favoriteData
       [
         ExplorePageData(
-          'WebDAV',
+          exploreTitle,
           ExplorePageType.multiPageComicList,
           (page) async {
             if (page > 1) {
@@ -41,13 +46,16 @@ class WebDavBuiltinSource {
             try {
               await WebDavProvider().loadComics(forceRefresh: true);
               final comics = WebDavProvider().comics ?? [];
-              return Res(
-                comics
-                    .where((e) => !(e.isDirectory && e.isCategory))
-                    .map(_toComic)
-                    .toList(),
-                subData: 1,
+              final list = <Comic>[];
+              for (final e in comics) {
+                if (e.isDirectory && e.isCategory) continue;
+                list.add(await _toComicAsync(e));
+              }
+              // Default sort by display title (info.json title when present)
+              list.sort(
+                (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
               );
+              return Res(list, subData: 1);
             } catch (e) {
               return Res.error(e.toString());
             }
@@ -70,19 +78,25 @@ class WebDavBuiltinSource {
             await WebDavProvider().loadComics(forceRefresh: false);
             final all = WebDavProvider().comics ?? [];
             final kw = keyword.trim().toLowerCase();
-            final filtered = all
-                .where((e) => !(e.isDirectory && e.isCategory))
-                .where((e) => kw.isEmpty || e.name.toLowerCase().contains(kw))
-                .map(_toComic)
-                .toList();
-            return Res(filtered, subData: 1);
+            final list = <Comic>[];
+            for (final e in all) {
+              if (e.isDirectory && e.isCategory) continue;
+              final comic = await _toComicAsync(e);
+              if (kw.isEmpty || _matchSearch(comic, e, kw)) {
+                list.add(comic);
+              }
+            }
+            list.sort(
+              (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+            );
+            return Res(list, subData: 1);
           } catch (e) {
             return Res.error(e.toString());
           }
         },
         null,
       ),
-      null, // settings — use home card / dedicated page
+      null, // settings
       loadComicInfo,
       null, // loadComicThumbnail
       loadComicPages,
@@ -99,8 +113,36 @@ class WebDavBuiltinSource {
       null,
       null,
       null,
-      null,
-      null,
+      {
+        'zh_CN': {
+          'WebDAV': 'WebDAV',
+          'WebDAV Comics': 'WebDAV 漫画',
+          'Author': '作者',
+          '作者': '作者',
+          '题材': '题材',
+          '状态': '状态',
+          '年份': '年份',
+          '语言': '语言',
+          '标签': '标签',
+        },
+        'zh_TW': {
+          'WebDAV': 'WebDAV',
+          'WebDAV Comics': 'WebDAV 漫畫',
+          'Author': '作者',
+          '作者': '作者',
+          '题材': '題材',
+          '状态': '狀態',
+          '年份': '年份',
+          '语言': '語言',
+          '标签': '標籤',
+        },
+        'en_US': {
+          'WebDAV': 'WebDAV',
+          'WebDAV Comics': 'WebDAV Comics',
+          'Author': 'Author',
+        },
+      },
+      null, // handleClickTagEvent
       null,
       null,
       false,
@@ -110,21 +152,59 @@ class WebDavBuiltinSource {
     );
   }
 
-  static Comic _toComic(WebDavComicEntry e) {
-    final cover = e.coverPath == null
-        ? ''
-        : (e.coverPath!.startsWith('webdav://') ||
-                e.coverPath!.startsWith('file://') ||
-                e.coverPath!.startsWith('http')
-            ? e.coverPath!
-            : 'webdav://${e.coverPath}');
+  static bool _matchSearch(Comic comic, WebDavComicEntry entry, String kw) {
+    if (comic.title.toLowerCase().contains(kw)) return true;
+    if ((comic.subtitle ?? '').toLowerCase().contains(kw)) return true;
+    if (entry.name.toLowerCase().contains(kw)) return true;
+    if (entry.path.toLowerCase().contains(kw)) return true;
+    for (final t in comic.tags ?? const <String>[]) {
+      if (t.toLowerCase().contains(kw)) return true;
+    }
+    return false;
+  }
+
+  static String _coverOf(WebDavComicEntry e) {
+    if (e.coverPath == null) return '';
+    final c = e.coverPath!;
+    if (c.startsWith('webdav://') ||
+        c.startsWith('file://') ||
+        c.startsWith('http')) {
+      return c;
+    }
+    return 'webdav://$c';
+  }
+
+  static Future<Comic> _toComicAsync(WebDavComicEntry e) async {
+    String title = e.name;
+    String? author;
+    final tags = <String>[];
+    double? stars;
+    if (e.isDirectory) {
+      final info = await WebDavProvider().loadComicInfo(e.path);
+      if (info != null) {
+        if (info.title != null && info.title!.trim().isNotEmpty) {
+          title = info.title!.trim();
+        }
+        if (info.author != null && info.author!.trim().isNotEmpty) {
+          author = info.author!.trim();
+        }
+        stars = info.stars;
+        // Flatten dynamic tags from info.json for list display/search
+        for (final entry in info.tags.entries) {
+          for (final v in entry.value) {
+            tags.add('${entry.key}:$v');
+          }
+        }
+      }
+    }
+    final desc = e.isDirectory ? 'Folder'.tl : 'Archive'.tl;
     return Comic(
-      e.name,
-      cover,
+      title,
+      _coverOf(e),
       e.path,
-      null,
-      const [],
-      e.isDirectory ? 'Folder'.tl : 'Archive'.tl,
+      author,
+      tags,
+      desc,
       key,
       null,
       null,
@@ -143,10 +223,9 @@ class WebDavBuiltinSource {
       final name = path.split('/').where((s) => s.isNotEmpty).last;
       final isDirectory = path.endsWith('/');
 
-      // info.json metadata
-      final info = isDirectory ? await provider.loadComicInfo(path) : null;
+      final ComicInfo? info =
+          isDirectory ? await provider.loadComicInfo(path) : null;
 
-      // Cover
       String cover = '';
       if (info?.cover != null && info!.cover!.isNotEmpty) {
         final c = info.cover!;
@@ -154,7 +233,6 @@ class WebDavBuiltinSource {
             ? c
             : 'webdav://${path}${c.startsWith('/') ? c.substring(1) : c}';
       } else {
-        // Probe cover via a temporary entry
         final entry = WebDavComicEntry(
           name: name,
           path: path,
@@ -171,7 +249,6 @@ class WebDavBuiltinSource {
         } catch (_) {}
       }
 
-      // Chapters or flat images
       ComicChapters? chapters;
       int? maxPage;
       if (isDirectory) {
@@ -187,22 +264,29 @@ class WebDavBuiltinSource {
           maxPage = images.length;
         }
       } else {
-        // Single archive — one synthetic chapter for cleaner UI, or flat
         final images = await provider.getComicImages(path);
         maxPage = images.length;
       }
 
+      // Tags come only from info.json — do not invent fixed namespaces.
       final tags = <String, List<String>>{};
       if (info != null && info.tags.isNotEmpty) {
-        tags.addAll(info.tags);
-      }
-      if (info?.author != null && info!.author!.isNotEmpty) {
-        tags.putIfAbsent('Author', () => [info.author!]);
+        for (final e in info.tags.entries) {
+          if (e.value.isNotEmpty) {
+            tags[e.key] = List<String>.from(e.value);
+          }
+        }
       }
 
+      final author = info?.author?.trim();
+      final title = (info?.title?.trim().isNotEmpty == true)
+          ? info!.title!.trim()
+          : name;
+
       final json = <String, dynamic>{
-        'title': info?.title ?? name,
-        'subtitle': info?.author,
+        'title': title,
+        // Empty subtitle omitted so title block does not show a blank author line
+        'subtitle': (author != null && author.isNotEmpty) ? author : null,
         'cover': cover,
         'description': info?.description ?? '',
         'tags': tags,
@@ -243,13 +327,19 @@ class WebDavBuiltinSource {
     final manager = ComicSourceManager();
     if (manager.find(key) != null) return;
     final source = create();
-    // Ensure explore page is enabled by default once
     final explorePages =
         List<String>.from(appdata.settings['explore_pages'] ?? []);
-    if (!explorePages.contains('WebDAV')) {
-      explorePages.add('WebDAV');
+    // Migrate old explore tab id
+    if (explorePages.contains('WebDAV') &&
+        !explorePages.contains(exploreTitle)) {
+      final i = explorePages.indexOf('WebDAV');
+      explorePages[i] = exploreTitle;
       appdata.settings['explore_pages'] = explorePages;
-      // fire-and-forget save
+      appdata.saveData(false);
+    } else if (!explorePages.contains(exploreTitle) &&
+        !explorePages.contains('WebDAV')) {
+      explorePages.add(exploreTitle);
+      appdata.settings['explore_pages'] = explorePages;
       appdata.saveData(false);
     }
     manager.add(source);

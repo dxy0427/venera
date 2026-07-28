@@ -11,6 +11,7 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/sqlite_connection.dart';
 import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/utils/tags_translation.dart';
+import 'package:venera/utils/translations.dart';
 import 'dart:io';
 
 import 'app.dart';
@@ -82,7 +83,7 @@ class FavoriteItem implements Comic {
     final sourceName = type == ComicType.local
         ? 'local'
         : type == ComicType.webdav
-            ? 'WebDAV'
+            ? 'WebDAV'.tl
             : type.comicSource?.name ?? "Unknown";
     return appdata.settings['comicDisplayMode'] == 'detailed'
         ? "$time | $sourceName"

@@ -85,7 +85,7 @@ class WebDavComicClient {
     if (path is String && path.trim().isNotEmpty) {
       return _normalizePath(path);
     }
-    return '/comics/';
+    return '/';
   }
 
   static String _normalizePath(String path) {

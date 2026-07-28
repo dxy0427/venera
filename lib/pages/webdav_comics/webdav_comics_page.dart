@@ -12,6 +12,8 @@ import 'webdav_settings_page.dart';
 
 /// Sort mode for WebDAV comics.
 enum WebDavSortMode {
+  titleAsc('title_asc', 'Title ↑'),
+  titleDesc('title_desc', 'Title ↓'),
   nameAsc('name_asc', 'Name ↑'),
   nameDesc('name_desc', 'Name ↓'),
   dateAsc('date_asc', 'Date ↑'),
@@ -40,7 +42,9 @@ class WebDavComicsPage extends StatefulWidget {
 }
 
 class _WebDavComicsPageState extends State<WebDavComicsPage> {
-  WebDavSortMode _sortMode = WebDavSortMode.nameAsc;
+  WebDavSortMode _sortMode = WebDavSortMode.titleAsc;
+  /// Display titles from info.json (path -> title).
+  final Map<String, String> _infoTitles = {};
 
   /// Current browsing path (null = root).
   String? _currentPath;
@@ -242,14 +246,43 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
     );
   }
 
+  String _displayTitle(WebDavComicEntry c) =>
+      _infoTitles[c.path] ?? c.name;
+
+  Future<void> _loadInfoTitles(List<WebDavComicEntry> comics) async {
+    var changed = false;
+    for (final c in comics) {
+      if (!c.isDirectory || c.isCategory) continue;
+      if (_infoTitles.containsKey(c.path)) continue;
+      try {
+        final info = await WebDavProvider().loadComicInfo(c.path);
+        final t = info?.title?.trim();
+        _infoTitles[c.path] = (t != null && t.isNotEmpty) ? t : c.name;
+        changed = true;
+      } catch (_) {
+        _infoTitles[c.path] = c.name;
+      }
+    }
+    if (changed && mounted) setState(() {});
+  }
+
   List<WebDavComicEntry> _sortComics(List<WebDavComicEntry> comics) {
     final sorted = List<WebDavComicEntry>.from(comics);
+    // Prefetch info.json titles for title sort / display
+    Future.microtask(() => _loadInfoTitles(comics));
     // Category folders always come first
     sorted.sort((a, b) {
       if (a.isCategory && !b.isCategory) return -1;
       if (!a.isCategory && b.isCategory) return 1;
-      // Then sort by selected mode
       switch (_sortMode) {
+        case WebDavSortMode.titleAsc:
+          return _displayTitle(a)
+              .toLowerCase()
+              .compareTo(_displayTitle(b).toLowerCase());
+        case WebDavSortMode.titleDesc:
+          return _displayTitle(b)
+              .toLowerCase()
+              .compareTo(_displayTitle(a).toLowerCase());
         case WebDavSortMode.nameAsc:
           return a.name.compareTo(b.name);
         case WebDavSortMode.nameDesc:
@@ -287,6 +320,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
           if (index >= sorted.length) return null;
           return _WebDavComicCard(
             comic: sorted[index],
+            title: _displayTitle(sorted[index]),
             onTap: () => _openComic(sorted[index]),
           );
         },
@@ -316,7 +350,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
         () => ComicPage(
           id: comic.path,
           sourceKey: 'webdav',
-          title: comic.name,
+          title: _displayTitle(comic),
           cover: cover,
         ),
       );
@@ -327,9 +361,14 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
 /// Card widget displaying a WebDAV comic thumbnail.
 class _WebDavComicCard extends StatelessWidget {
   final WebDavComicEntry comic;
+  final String title;
   final VoidCallback onTap;
 
-  const _WebDavComicCard({required this.comic, required this.onTap});
+  const _WebDavComicCard({
+    required this.comic,
+    required this.title,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -349,7 +388,7 @@ class _WebDavComicCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    comic.name,
+                    title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: ts.s14.bold,

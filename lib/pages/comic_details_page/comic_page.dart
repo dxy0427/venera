@@ -383,14 +383,22 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SelectableText(comic.title, style: ts.s18),
-                if (comic.subTitle != null)
+                if (comic.subTitle != null && comic.subTitle!.trim().isNotEmpty)
                   SelectableText(
                     comic.subTitle!,
                     style: ts.s14,
                   ).paddingVertical(4),
                 Text(
-                  (ComicSource.find(comic.sourceKey)?.name) ??
-                      (comic.sourceKey == 'webdav' ? 'WebDAV' : ''),
+                  () {
+                    final src = ComicSource.find(comic.sourceKey);
+                    final raw = src?.name ??
+                        (comic.sourceKey == 'webdav' ? 'WebDAV' : '');
+                    if (raw.isEmpty) return '';
+                    // Prefer source-provided translations, then app .tl
+                    final viaSource = raw.ts(comic.sourceKey);
+                    if (viaSource != raw) return viaSource;
+                    return raw.tl;
+                  }(),
                   style: ts.s12,
                 ),
               ],
@@ -706,18 +714,35 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
         children: [
           ListTile(title: Text("Information".tl)),
           if (comic.stars != null)
-            Row(
+            buildWrap(
               children: [
-                StarRating(value: comic.stars!, size: 24, onTap: starRating),
-                const SizedBox(width: 8),
-                Text(comic.stars!.toStringAsFixed(2)),
+                buildTag(text: 'Rating'.tl, isTitle: true),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    StarRating(
+                      value: comic.stars!,
+                      size: 20,
+                      onTap: starRating,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(comic.stars!.toStringAsFixed(1)),
+                  ],
+                ),
               ],
-            ).paddingLeft(16).paddingVertical(8),
+            ),
           for (var e in comic.tags.entries)
             buildWrap(
               children: [
                 if (e.value.isNotEmpty)
-                  buildTag(text: e.key.ts(comicSource.key), isTitle: true),
+                  buildTag(
+                    text: () {
+                      final viaSource = e.key.ts(comicSource.key);
+                      if (viaSource != e.key) return viaSource;
+                      return e.key.tl;
+                    }(),
+                    isTitle: true,
+                  ),
                 for (var tag in e.value)
                   buildTag(
                     text: enableTranslation
