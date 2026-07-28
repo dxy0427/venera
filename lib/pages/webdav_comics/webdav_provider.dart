@@ -496,13 +496,14 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load info.json from a comic directory (with caching).
   Future<ComicInfo?> loadComicInfo(String comicPath) async {
-    final cacheKey = _cacheKey('webdav_info', comicPath);
+    final cacheKey = _cacheKey('webdav_info_v2', comicPath);
 
     // Check cache first
     final cached = await CacheManager().findCache(cacheKey);
     if (cached != null) {
       try {
-        final content = await cached.readAsString();
+        final bytes = await cached.readAsBytes();
+        final content = utf8.decode(bytes, allowMalformed: true).replaceFirst('\uFEFF', '');
         final json = Map<String, dynamic>.from(
           const JsonDecoder().convert(content) as Map,
         );
@@ -518,7 +519,7 @@ class WebDavProvider with ChangeNotifier {
 
       await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
 
-      final content = String.fromCharCodes(data);
+      final content = utf8.decode(data, allowMalformed: true).replaceFirst('\uFEFF', '');
       final json = Map<String, dynamic>.from(
         const JsonDecoder().convert(content) as Map,
       );
