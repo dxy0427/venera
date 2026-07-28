@@ -15,7 +15,6 @@ import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/background_download.dart';
 import 'package:venera/utils/natural_sort.dart';
-import 'package:venera/utils/translations.dart';
 
 import 'app.dart';
 import 'history.dart';
@@ -226,123 +225,28 @@ class LocalManager with ChangeNotifier {
     }
   }
 
-  Future<bool> _canWriteDirectory(String dirPath) async {
-    try {
-      return await overrideIO(() async {
-        final dir = Directory(dirPath);
-        if (!dir.existsSync()) {
-          dir.createSync(recursive: true);
-        }
-        final probe = File(FilePath.join(dirPath, '.venera_write_test'));
-        await probe.writeAsString('ok', flush: true);
-        if (probe.existsSync()) {
-          await probe.delete();
-        }
-        return true;
-      });
-    } catch (e, s) {
-      Log.error("IO", "Write probe failed for $dirPath: $e", s);
-      return false;
-    }
-  }
-
-  String _normalizeDirPath(String p) {
-    var s = p;
-    while (s.length > 1 && (s.endsWith('/') || s.endsWith('\\'))) {
-      s = s.substring(0, s.length - 1);
-    }
-    return s;
-  }
-
-  /// Ensure [picked] exists (create if needed) and return normalized path.
-  /// Non-empty folders are allowed — user may already keep comics there.
-  Future<String?> _resolveStorageRoot(String picked) async {
-    final base = _normalizeDirPath(picked);
-    final baseDir = Directory(base);
-    try {
-      await overrideIO(() async {
-        if (!baseDir.existsSync()) {
-          baseDir.createSync(recursive: true);
-        }
-      });
-    } catch (e, s) {
-      Log.error("IO", e, s);
-      return null;
-    }
-    return base;
-  }
-
   // return error message if failed
   Future<String?> setNewPath(String newPath) async {
-    final current = _normalizeDirPath(path);
-    final resolved = await _resolveStorageRoot(newPath);
-    if (resolved == null) {
-      return "Directory does not exist".tl;
+    var newDir = Directory(newPath);
+    if (!await newDir.exists()) {
+      return "Directory does not exist";
     }
-    final normalized = _normalizeDirPath(resolved);
-    if (normalized == current) {
-      return null;
+    if (!await newDir.list().isEmpty) {
+      return "Directory is not empty";
     }
-
-    if (!await _canWriteDirectory(normalized)) {
-      return "No write permission for the selected directory. On Android, pick the folder with the system file picker (e.g. Download/venera). Full storage permission is not required."
-          .tl;
-    }
-
-    final oldPath = path;
-    final oldDir = Directory(oldPath);
-    final newDir = Directory(normalized);
     try {
-      // Migrate existing library into the new root (merge OK if target
-      // already has folders/files — e.g. user-prepared Download/venera).
-      if (await overrideIO(() async => oldDir.existsSync())) {
-        final oldNorm = _normalizeDirPath(oldPath);
-        if (oldNorm != normalized &&
-            !normalized.startsWith('$oldNorm/') &&
-            !normalized.startsWith('$oldNorm\\') &&
-            !oldNorm.startsWith('$normalized/') &&
-            !oldNorm.startsWith('$normalized\\')) {
-          await copyDirectoryIsolate(oldDir, newDir);
-        }
-      }
+      await copyDirectoryIsolate(directory, newDir);
       await File(
         FilePath.join(App.dataPath, 'local_path'),
-      ).writeAsString(normalized);
+      ).writeAsString(newPath);
     } catch (e, s) {
       Log.error("IO", e, s);
       return e.toString();
     }
-    path = normalized;
-    try {
-      await overrideIO(() async => _checkNoMedia());
-    } catch (e, s) {
-      Log.error("IO", "Failed to create .nomedia: $e", s);
-    }
-    // Best-effort cleanup of old location; do not fail the path switch.
-    // Skip if new path is inside old path (or vice versa) to avoid wiping data.
-    try {
-      final oldNorm = _normalizeDirPath(oldPath);
-      final safeToClean = oldNorm != normalized &&
-          !normalized.startsWith('$oldNorm/') &&
-          !normalized.startsWith('$oldNorm\\') &&
-          !oldNorm.startsWith('$normalized/') &&
-          !oldNorm.startsWith('$normalized\\');
-      if (safeToClean && await overrideIO(() async => oldDir.existsSync())) {
-        await overrideIO(() async {
-          await oldDir.deleteContents(recursive: true);
-        });
-      }
-    } catch (e, s) {
-      Log.error("IO", "Failed to clean old local path: $e", s);
-    }
-    notifyListeners();
+    await directory.deleteContents(recursive: true);
+    path = newPath;
+    _checkNoMedia();
     return null;
-  }
-
-  /// Move comics back to the app-private default path (no extra permission).
-  Future<String?> resetToDefaultPath() async {
-    final def = await findDefaultPath();
-    return setNewPath(def);
   }
 
   Future<String> findDefaultPath() async {
