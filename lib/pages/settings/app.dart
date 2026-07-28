@@ -55,7 +55,15 @@ class _AppSettingsState extends State<AppSettings> {
               context.showMessage(message: res);
             } else {
               if (!context.mounted) return;
-              context.showMessage(message: "Path set successfully".tl);
+              final path = LocalManager().path;
+              final usedSub = path.endsWith('venera_local') ||
+                  path.endsWith(r'venera_local');
+              context.showMessage(
+                message: usedSub
+                    ? "Path set successfully. Non-empty folder → used @p"
+                        .tlParams({'p': path})
+                    : "Path set successfully".tl,
+              );
               setState(() {});
             }
           },

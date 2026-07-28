@@ -241,63 +241,110 @@ class LocalManager with ChangeNotifier {
 
   Future<bool> _isEffectivelyEmpty(Directory dir) async {
     try {
-      await for (final entity in dir.list(followLinks: false)) {
-        if (!_isIgnorableStorageEntry(entity.name)) {
-          return false;
+      return await overrideIO(() async {
+        if (!dir.existsSync()) return true;
+        await for (final entity in dir.list(followLinks: false)) {
+          if (!_isIgnorableStorageEntry(entity.name)) {
+            return false;
+          }
         }
-      }
-      return true;
+        return true;
+      });
     } catch (e, s) {
       Log.error("IO", "Failed to list directory for setNewPath: $e", s);
+      // Listing failed: do not block solely on "not empty"; write probe decides.
+      return true;
+    }
+  }
+
+  Future<bool> _canWriteDirectory(String dirPath) async {
+    try {
+      return await overrideIO(() async {
+        final dir = Directory(dirPath);
+        if (!dir.existsSync()) {
+          dir.createSync(recursive: true);
+        }
+        final probe = File(FilePath.join(dirPath, '.venera_write_test'));
+        await probe.writeAsString('ok', flush: true);
+        if (probe.existsSync()) {
+          await probe.delete();
+        }
+        return true;
+      });
+    } catch (e, s) {
+      Log.error("IO", "Write probe failed for $dirPath: $e", s);
       return false;
     }
   }
 
+  String _normalizeDirPath(String p) {
+    var s = p;
+    while (s.length > 1 && (s.endsWith('/') || s.endsWith('\\'))) {
+      s = s.substring(0, s.length - 1);
+    }
+    return s;
+  }
+
+  /// Prefer [base]/venera_local when [base] already has user files.
+  Future<String?> _resolveStorageRoot(String picked) async {
+    final base = _normalizeDirPath(picked);
+    final baseDir = Directory(base);
+    if (!await overrideIO(() async => baseDir.existsSync())) {
+      try {
+        await overrideIO(() async {
+          baseDir.createSync(recursive: true);
+        });
+      } catch (e, s) {
+        Log.error("IO", e, s);
+        return null;
+      }
+    }
+
+    if (await _isEffectivelyEmpty(baseDir)) {
+      return base;
+    }
+
+    // Picked folder has real content: use a dedicated subfolder to avoid mixing.
+    final sub = FilePath.join(base, 'venera_local');
+    final subDir = Directory(sub);
+    try {
+      await overrideIO(() async {
+        if (!subDir.existsSync()) {
+          subDir.createSync(recursive: true);
+        }
+      });
+    } catch (e, s) {
+      Log.error("IO", e, s);
+      return null;
+    }
+    if (!await _isEffectivelyEmpty(subDir)) {
+      // Subfolder already used by another install with comics — still OK to reuse.
+      // Only reject if we cannot write.
+    }
+    return sub;
+  }
+
   // return error message if failed
   Future<String?> setNewPath(String newPath) async {
-    // Normalize trailing separators for comparison.
-    var normalized = newPath;
-    while (normalized.length > 1 &&
-        (normalized.endsWith('/') || normalized.endsWith('\\'))) {
-      normalized = normalized.substring(0, normalized.length - 1);
+    final current = _normalizeDirPath(path);
+    final resolved = await _resolveStorageRoot(newPath);
+    if (resolved == null) {
+      return "Directory does not exist".tl;
     }
-    var current = path;
-    while (current.length > 1 &&
-        (current.endsWith('/') || current.endsWith('\\'))) {
-      current = current.substring(0, current.length - 1);
-    }
+    final normalized = _normalizeDirPath(resolved);
     if (normalized == current) {
       return null;
     }
 
-    var newDir = Directory(normalized);
-    if (!await newDir.exists()) {
-      try {
-        await newDir.create(recursive: true);
-      } catch (e, s) {
-        Log.error("IO", e, s);
-        return "Directory does not exist".tl;
-      }
-    }
-    if (!await _isEffectivelyEmpty(newDir)) {
-      return "Directory is not empty. Choose an empty folder (hidden files like .nomedia are OK)."
-          .tl;
-    }
-
-    // Ensure we can write in the destination before migrating.
-    try {
-      final probe = File(FilePath.join(normalized, '.venera_write_test'));
-      await probe.writeAsString('ok');
-      await probe.delete();
-    } catch (e, s) {
-      Log.error("IO", e, s);
+    if (!await _canWriteDirectory(normalized)) {
       return "No write permission for the selected directory".tl;
     }
 
     final oldPath = path;
     final oldDir = Directory(oldPath);
+    final newDir = Directory(normalized);
     try {
-      if (await oldDir.exists()) {
+      if (await overrideIO(() async => oldDir.existsSync())) {
         await copyDirectoryIsolate(oldDir, newDir);
       }
       await File(
@@ -311,8 +358,11 @@ class LocalManager with ChangeNotifier {
     _checkNoMedia();
     // Best-effort cleanup of old location; do not fail the path switch.
     try {
-      if (oldPath != normalized && await oldDir.exists()) {
-        await oldDir.deleteContents(recursive: true);
+      if (oldPath != normalized &&
+          await overrideIO(() async => oldDir.existsSync())) {
+        await overrideIO(() async {
+          await oldDir.deleteContents(recursive: true);
+        });
       }
     } catch (e, s) {
       Log.error("IO", "Failed to clean old local path: $e", s);

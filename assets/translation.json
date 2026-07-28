@@ -580,8 +580,9 @@
     "Connection Settings": "连接设置",
     "Directory does not exist": "目录不存在",
     "Directory is not empty. Choose an empty folder (hidden files like .nomedia are OK).": "目录非空。请选择空文件夹（.nomedia 等隐藏文件可忽略）",
-    "No write permission for the selected directory": "所选目录没有写入权限",
-    "Path set successfully": "路径设置成功"
+    "No write permission for the selected directory": "所选目录没有写入权限。请换一个可写的位置（Android 建议新建空文件夹）",
+    "Path set successfully": "路径设置成功",
+    "Path set successfully. Non-empty folder → used @p": "路径设置成功。所选目录非空，已使用 @p"
   },
   "zh_TW": {
     "Home": "首頁",
@@ -1164,7 +1165,8 @@
     "Connection Settings": "連線設定",
     "Directory does not exist": "目錄不存在",
     "Directory is not empty. Choose an empty folder (hidden files like .nomedia are OK).": "目錄非空。請選擇空資料夾（.nomedia 等隱藏檔可忽略）",
-    "No write permission for the selected directory": "所選目錄沒有寫入權限",
-    "Path set successfully": "路徑設定成功"
+    "No write permission for the selected directory": "所選目錄沒有寫入權限。請換一個可寫的位置（Android 建議新建空資料夾）",
+    "Path set successfully": "路徑設定成功",
+    "Path set successfully. Non-empty folder → used @p": "路徑設定成功。所選目錄非空，已使用 @p"
   }
 }
