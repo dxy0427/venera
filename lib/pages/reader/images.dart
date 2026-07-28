@@ -93,27 +93,32 @@ class _ReaderImagesState extends State<_ReaderImages> {
       var cacheKey =
           "loadComicPages@${reader.type.sourceKey}@${reader.cid}@${reader.eid}";
 
-      // Try cache first
-      var cacheFile = await CacheManager().findCache(cacheKey);
-      if (cacheFile != null) {
-        try {
-          var cacheData = await cacheFile.readAsBytes();
-          var cacheList = (jsonDecode(utf8.decode(cacheData)) as List)
-              .cast<String>();
-          if (!mounted) return;
-          setState(() {
-            reader.images = cacheList;
-            reader.isLoading = false;
-            inProgress = false;
-            _handleJumpToLastPage();
-            Future.microtask(() {
-              reader.updateHistory();
+      // WebDAV page lists may contain stream:// keys that need a live
+      // streaming reader. Prefer a short-lived/no pages-list cache for
+      // webdav so reading always re-inits stream metadata correctly.
+      final isWebDav = reader.type.sourceKey == 'webdav';
+      if (!isWebDav) {
+        var cacheFile = await CacheManager().findCache(cacheKey);
+        if (cacheFile != null) {
+          try {
+            var cacheData = await cacheFile.readAsBytes();
+            var cacheList = (jsonDecode(utf8.decode(cacheData)) as List)
+                .cast<String>();
+            if (!mounted) return;
+            setState(() {
+              reader.images = cacheList;
+              reader.isLoading = false;
+              inProgress = false;
+              _handleJumpToLastPage();
+              Future.microtask(() {
+                reader.updateHistory();
+              });
             });
-          });
-          context.readerScaffold.update();
-          return;
-        } catch (_) {
-          // Cache corrupted, fall through to network request
+            context.readerScaffold.update();
+            return;
+          } catch (_) {
+            // Cache corrupted, fall through to network request
+          }
         }
       }
 
@@ -129,8 +134,9 @@ class _ReaderImagesState extends State<_ReaderImages> {
           inProgress = false;
         });
       } else {
-        // Save to cache in background
-        _savePagesCache(cacheKey, res.data);
+        if (!isWebDav) {
+          _savePagesCache(cacheKey, res.data);
+        }
         setState(() {
           reader.images = res.data;
           reader.isLoading = false;

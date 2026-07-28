@@ -287,61 +287,83 @@ class WebDavComicClient {
     return chapters;
   }
 
-  /// Load a cover image for a comic entry.
-  /// Checks for common cover filenames first, then falls back to first image.
-  Future<Uint8List?> loadCover(WebDavComicEntry comic) async {
-    if (comic.coverPath != null) {
-      return readImage(comic.coverPath!);
+  /// Resolve cover path only (no image download). Used by explore/list.
+  Future<String?> resolveCoverPath(WebDavComicEntry comic) async {
+    if (comic.coverPath != null && comic.coverPath!.isNotEmpty) {
+      return comic.coverPath;
     }
-
     if (comic.isDirectory) {
       try {
-        // 1. Check for cover files with common names
-        final coverNames = [
-          'cover.jpg', 'cover.jpeg', 'cover.png',
-          'folder.jpg', 'folder.jpeg', 'folder.png',
-          'thumb.jpg', 'thumb.jpeg', 'thumb.png',
-          'Cover.jpg', 'Cover.jpeg', 'Cover.png',
-          '封面.jpg', '封面.jpeg', '封面.png',
-        ];
+        final coverNames = {
+          'cover.jpg',
+          'cover.jpeg',
+          'cover.png',
+          'folder.jpg',
+          'folder.jpeg',
+          'folder.png',
+          'thumb.jpg',
+          'thumb.jpeg',
+          'thumb.png',
+          'cover.webp',
+          'folder.webp',
+          '封面.jpg',
+          '封面.jpeg',
+          '封面.png',
+        };
         final client = getClient();
         final items = await client.readDir(comic.path);
-
+        String? firstImage;
+        String? firstArchive;
         for (final item in items) {
           final name = item.name ?? '';
-          if (coverNames.contains(name)) {
+          if (name.isEmpty || name == '.') continue;
+          if (item.isDir == true) continue;
+          final lower = name.toLowerCase();
+          final ext = _getExtension(name).toLowerCase();
+          if (coverNames.contains(lower)) {
             comic.coverPath = '${comic.path}$name';
-            return readImage(comic.coverPath!);
+            return comic.coverPath;
+          }
+          if (firstImage == null && _imageExtensions.contains(ext)) {
+            firstImage = '${comic.path}$name';
+          }
+          if (firstArchive == null && _archiveExtensions.contains(ext)) {
+            firstArchive = '${comic.path}$name';
           }
         }
-
-        // 2. No cover file found - try first image in directory
-        for (final item in items) {
-          final name = item.name ?? '';
-          final ext = _getExtension(name).toLowerCase();
-          if (_imageExtensions.contains(ext)) {
-            comic.coverPath = '${comic.path}$name';
-            return readImage(comic.coverPath!);
-          }
+        if (firstImage != null) {
+          comic.coverPath = firstImage;
+          return comic.coverPath;
         }
-
-        // 3. No images - try first CBZ file's first image
-        for (final item in items) {
-          final name = item.name ?? '';
-          final ext = _getExtension(name).toLowerCase();
-          if (_archiveExtensions.contains(ext)) {
-            try {
-              final cover = await _extractCbzCover('${comic.path}$name');
-              if (cover != null) {
-                comic.coverPath = '${comic.path}$name'; // Mark as having cover
-                return cover;
-              }
-            } catch (_) {}
-          }
+        if (firstArchive != null) {
+          // Cover will be loaded via stream from the archive entry later.
+          comic.coverPath = 'stream://$firstArchive';
+          return comic.coverPath;
         }
       } catch (_) {}
+      return null;
     }
-    return null;
+
+    // Archive comic (cbz/zip): cover is streamed from first image entry.
+    comic.coverPath = 'stream://${comic.path}';
+    return comic.coverPath;
+  }
+
+  /// Load a cover image for a comic entry.
+  Future<Uint8List?> loadCover(WebDavComicEntry comic) async {
+    final path = await resolveCoverPath(comic);
+    if (path == null || path.isEmpty) return null;
+    if (path.startsWith('stream://')) {
+      // Handled by provider stream loader.
+      return null;
+    }
+    try {
+      return await readImage(
+        path.startsWith('webdav://') ? path.substring(8) : path,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Extract the first image from a CBZ file as cover.

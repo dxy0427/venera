@@ -56,11 +56,17 @@ class WebDavBuiltinSource {
               );
             }
             try {
-              await WebDavProvider().loadComics(forceRefresh: true);
-              final comics = WebDavProvider().comics ?? [];
+              final provider = WebDavProvider();
+              await provider.loadComics(forceRefresh: true);
+              final comics = provider.comics ?? [];
+              final readable = comics
+                  .where((e) => !(e.isDirectory && e.isCategory))
+                  .toList();
+              // Resolve cover paths before building list items so explore
+              // can load thumbnails (stream:// for cbz, webdav:// for dirs).
+              await provider.ensureCoverPaths(readable);
               final list = <Comic>[];
-              for (final e in comics) {
-                if (e.isDirectory && e.isCategory) continue;
+              for (final e in readable) {
                 list.add(await _toComicAsync(e));
               }
               list.sort(
@@ -87,12 +93,16 @@ class WebDavBuiltinSource {
             return Res.error('WebDAV not configured'.tl);
           }
           try {
-            await WebDavProvider().loadComics(forceRefresh: false);
-            final all = WebDavProvider().comics ?? [];
+            final provider = WebDavProvider();
+            await provider.loadComics(forceRefresh: false);
+            final all = provider.comics ?? [];
+            final readable = all
+                .where((e) => !(e.isDirectory && e.isCategory))
+                .toList();
+            await provider.ensureCoverPaths(readable);
             final kw = keyword.trim().toLowerCase();
             final list = <Comic>[];
-            for (final e in all) {
-              if (e.isDirectory && e.isCategory) continue;
+            for (final e in readable) {
               final comic = await _toComicAsync(e);
               if (kw.isEmpty || _matchSearch(comic, e, kw)) {
                 list.add(comic);
@@ -182,9 +192,14 @@ class WebDavBuiltinSource {
   }
 
   static String _coverOf(WebDavComicEntry e) {
-    if (e.coverPath == null) return '';
+    if (e.coverPath == null || e.coverPath!.isEmpty) {
+      // Archive fallback: stream first image as cover.
+      if (!e.isDirectory) return 'stream://${e.path}';
+      return '';
+    }
     final c = e.coverPath!;
     if (c.startsWith('webdav://') ||
+        c.startsWith('stream://') ||
         c.startsWith('file://') ||
         c.startsWith('http')) {
       return c;

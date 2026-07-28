@@ -9,6 +9,7 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/io.dart';
 
+import 'webdav_accounts.dart';
 import 'webdav_client.dart';
 import 'webdav_models.dart';
 import 'streaming_zip.dart';
@@ -31,6 +32,14 @@ class WebDavProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isConfigured => _client.isConfigured;
+
+  String get _accountScope {
+    final id = WebDavAccounts.activeId();
+    return (id == null || id.isEmpty) ? 'default' : id;
+  }
+
+  String _cacheKey(String prefix, String path) =>
+      '${prefix}_${_accountScope}_$path';
 
   /// Currently downloading chapter paths (for progress display).
   final Set<String> _downloadingChapters = {};
@@ -69,19 +78,25 @@ class WebDavProvider with ChangeNotifier {
     }
   }
 
-  void _loadCoversInBackground() async {
-    if (_comics == null) return;
-    for (int i = 0; i < _comics!.length; i++) {
-      final comic = _comics![i];
-      if (comic.coverPath != null) continue;
+  Future<void> ensureCoverPaths(List<WebDavComicEntry> comics) async {
+    for (final comic in comics) {
+      if (comic.isDirectory && comic.isCategory) continue;
+      if (comic.coverPath != null && comic.coverPath!.isNotEmpty) continue;
       try {
-        await _client.loadCover(comic);
-        if (comic.coverPath != null) notifyListeners();
+        await _client.resolveCoverPath(comic);
       } catch (e) {
         Log.error(
-            "WebDavProvider", "Failed to load cover for ${comic.name}: $e");
+          "WebDavProvider",
+          "Failed to resolve cover for ${comic.name}: $e",
+        );
       }
     }
+  }
+
+  void _loadCoversInBackground() async {
+    if (_comics == null) return;
+    await ensureCoverPaths(_comics!);
+    if (_comics != null) notifyListeners();
   }
 
   /// Get image paths for a comic.
@@ -93,11 +108,15 @@ class WebDavProvider with ChangeNotifier {
       final images = await _client.listImages(path);
       return images.map((e) => 'webdav://${e.path}').toList();
     } else {
-      // Try streaming first, fall back to download
+      // Always prefer streaming CBZ (range requests). Full download only
+      // as fallback when streaming is unavailable.
       try {
         return await _streamCbz(path);
       } catch (e) {
-        Log.warning("WebDavProvider", "Streaming failed, falling back to download: $e");
+        Log.warning(
+          "WebDavProvider",
+          "Streaming failed, falling back to download: $e",
+        );
         return _downloadAndExtractCbz(path);
       }
     }
@@ -135,34 +154,32 @@ class WebDavProvider with ChangeNotifier {
     return images.map((e) => 'webdav://${e.path}').toList();
   }
 
-  /// Get the cache directory for a CBZ file.
+  /// Get the cache directory for a CBZ file (offline extract fallback only).
   Directory getCbzCacheDir(String remotePath) {
     final pathHash = remotePath.hashCode.toRadixString(16);
-    return Directory(FilePath.join(App.cachePath, 'webdav_cbz', pathHash));
+    return Directory(
+      FilePath.join(App.cachePath, 'webdav_cbz', _accountScope, pathHash),
+    );
   }
 
-  /// Check if a CBZ is already cached.
+  /// Check if a CBZ is already fully extracted offline.
   bool isCbzCached(String remotePath) {
     final dir = getCbzCacheDir(remotePath);
     if (!dir.existsSync()) return false;
     return _listLocalImages(dir).isNotEmpty;
   }
 
-  /// Stream a CBZ file: list entries and return image paths with stream:// protocol.
-  Future<List<String>> _streamCbz(String remotePath) async {
-    // Check cache first
-    final cacheDir = getCbzCacheDir(remotePath);
-    if (cacheDir.existsSync()) {
-      final images = _listLocalImages(cacheDir);
-      if (images.isNotEmpty) return images;
-    }
+  Future<_StreamInfo> _ensureStreamReader(String remotePath) async {
+    final existing = _streamingReaders[remotePath];
+    if (existing != null) return existing;
 
-    // Use streaming ZIP reader
     final config = _client.getConfig();
     if (config == null) throw Exception('WebDAV not configured');
 
+    final base = config[0].replaceAll(RegExp(r'/+$'), '');
+    final fullPath = remotePath.startsWith('/') ? remotePath : '/$remotePath';
     final reader = StreamingZipReader(
-      webdavUrl: '${config[0].replaceAll(RegExp(r'/+\$'), '')}${remotePath.startsWith('/') ? remotePath : '/$remotePath'}',
+      webdavUrl: '$base$fullPath',
       user: config[1],
       pass: config[2],
     );
@@ -173,56 +190,69 @@ class WebDavProvider with ChangeNotifier {
         if (e.isDirectory) return false;
         final ext = _getExtension(e.fileName).toLowerCase();
         return {
-          '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'
+          '.jpg',
+          '.jpeg',
+          '.png',
+          '.gif',
+          '.webp',
+          '.bmp',
+          '.tiff',
+          '.tif',
         }.contains(ext);
       }).toList();
-
-      // Sort naturally
       imageEntries.sort((a, b) => _naturalCompare(a.fileName, b.fileName));
-
-      if (imageEntries.isEmpty) throw Exception('No images in CBZ');
-
-      // Store the reader for later image loading
-      _streamingReaders[remotePath] = _StreamInfo(
-        reader: reader,
-        entries: imageEntries,
-      );
-
-      // Return stream:// paths
-      return imageEntries
-          .map((e) => 'stream://${remotePath}::${e.fileName}')
-          .toList();
+      if (imageEntries.isEmpty) {
+        reader.dispose();
+        throw Exception('No images in CBZ');
+      }
+      final info = _StreamInfo(reader: reader, entries: imageEntries);
+      _streamingReaders[remotePath] = info;
+      return info;
     } catch (e) {
       reader.dispose();
       rethrow;
     }
   }
 
-  /// Cache for streaming ZIP readers.
+  /// Stream a CBZ file: list entries and return image paths with stream://.
+  /// Does NOT download the whole archive first.
+  Future<List<String>> _streamCbz(String remotePath) async {
+    final info = await _ensureStreamReader(remotePath);
+    return info.entries
+        .map((e) => 'stream://$remotePath::${e.fileName}')
+        .toList();
+  }
+
+  /// Cache for streaming ZIP readers (in-memory; rebuilt on demand).
   final Map<String, _StreamInfo> _streamingReaders = {};
 
   /// Load a single image from a streaming CBZ entry.
+  ///
+  /// [streamPath] formats:
+  /// - `stream://remotePath::entryFileName`
+  /// - `stream://remotePath` (first image, used as cover)
   Future<Uint8List> loadStreamImage(String streamPath) async {
-    // streamPath format: stream://remotePath::entryFileName
     final withoutProtocol = streamPath.substring(9); // remove 'stream://'
+    String remotePath;
+    String? entryName;
     final sep = withoutProtocol.indexOf('::');
     if (sep < 0) {
-      throw Exception('Invalid stream path: $streamPath');
+      remotePath = withoutProtocol;
+      entryName = null;
+    } else {
+      remotePath = withoutProtocol.substring(0, sep);
+      entryName = withoutProtocol.substring(sep + 2);
     }
-    final remotePath = withoutProtocol.substring(0, sep);
-    final entryName = withoutProtocol.substring(sep + 2);
 
-    // Check image cache
-    final cacheKey = 'webdav_stream_$remotePath/$entryName';
+    final info = await _ensureStreamReader(remotePath);
+    entryName ??= info.entries.first.fileName;
+
+    final cacheKey = _cacheKey('webdav_stream', '$remotePath/$entryName');
     final cached = await CacheManager().findCache(cacheKey);
     if (cached != null) return cached.readAsBytes();
 
-    // Load from streaming reader
-    final info = _streamingReaders[remotePath];
-    if (info == null) throw Exception('Stream not initialized for $remotePath');
-
     final data = await info.reader.readEntry(entryName);
-    await CacheManager().writeCache(cacheKey, data, 30 * 24 * 60 * 60 * 1000);
+    await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
     return data;
   }
 
@@ -351,22 +381,21 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load an image from WebDAV or streaming CBZ with caching.
   Future<Uint8List> loadImage(String path) async {
-    // Local extracted images
+    // Local extracted images (offline fallback)
     if (path.startsWith('file://')) {
       return File(path.substring(7)).readAsBytes();
     }
-    // Handle stream:// protocol (from streaming CBZ)
+    // Streaming CBZ entry / cover
     if (path.startsWith('stream://')) {
       return loadStreamImage(path);
     }
 
-    final realPath =
-        path.startsWith('webdav://') ? path.substring(8) : path;
-    final cacheKey = 'webdav_img_$realPath';
+    final realPath = path.startsWith('webdav://') ? path.substring(8) : path;
+    final cacheKey = _cacheKey('webdav_img', realPath);
     final cached = await CacheManager().findCache(cacheKey);
     if (cached != null) return cached.readAsBytes();
     final data = await _client.readImage(realPath);
-    await CacheManager().writeCache(cacheKey, data, 30 * 24 * 60 * 60 * 1000);
+    await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
     return data;
   }
 
@@ -457,13 +486,17 @@ class WebDavProvider with ChangeNotifier {
     _comics = null;
     _directoryEntries = null;
     _error = null;
+    for (final info in _streamingReaders.values) {
+      info.reader.dispose();
+    }
+    _streamingReaders.clear();
     _client = WebDavComicClient();
     await loadComics(forceRefresh: true);
   }
 
   /// Load info.json from a comic directory (with caching).
   Future<ComicInfo?> loadComicInfo(String comicPath) async {
-    final cacheKey = 'webdav_info_$comicPath';
+    final cacheKey = _cacheKey('webdav_info', comicPath);
 
     // Check cache first
     final cached = await CacheManager().findCache(cacheKey);
@@ -483,8 +516,7 @@ class WebDavProvider with ChangeNotifier {
       final infoPath = '${comicPath}info.json';
       final data = await _client.readImage(infoPath);
 
-      // Cache the raw JSON (30 days)
-      await CacheManager().writeCache(cacheKey, data, 30 * 24 * 60 * 60 * 1000);
+      await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
 
       final content = String.fromCharCodes(data);
       final json = Map<String, dynamic>.from(
