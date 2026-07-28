@@ -174,10 +174,13 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
             icon: Icons.chrome_reader_mode_outlined,
             text: "View Detail".tl,
             onClick: () {
+              final c = selectedComics.keys.first;
               context.to(
                 () => ComicPage(
-                  id: selectedComics.keys.first.id,
-                  sourceKey: selectedComics.keys.first.sourceKey,
+                  id: c.id,
+                  sourceKey: c.sourceKey,
+                  cover: 'file://${c.coverFile.path}',
+                  title: c.title,
                 ),
               );
             },

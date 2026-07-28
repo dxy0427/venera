@@ -431,7 +431,7 @@ class _LocalState extends State<_Local> {
                     () => ComicPage(
                       id: comic.id,
                       sourceKey: comic.sourceKey,
-                      cover: comic.cover,
+                      cover: 'file://${comic.coverFile.path}',
                       title: comic.title,
                       heroID: heroID,
                     ),

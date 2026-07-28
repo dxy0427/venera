@@ -595,8 +595,9 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     if (comic.tags.isEmpty &&
         comic.uploader == null &&
         comic.uploadTime == null &&
-        comic.uploadTime == null &&
-        comic.maxPage == null) {
+        comic.updateTime == null &&
+        comic.maxPage == null &&
+        comic.stars == null) {
       return const SliverPadding(padding: EdgeInsets.zero);
     }
 
@@ -1134,12 +1135,17 @@ class _ComicPageLoadingPlaceHolder extends StatelessWidget {
     Widget child;
     if (cover != null) {
       final ImageProvider image;
-      if (sourceKey == 'webdav' ||
+      if (cover!.startsWith('file://')) {
+        image = FileImage(File(cover!.substring(7)));
+      } else if (sourceKey == 'local') {
+        final local = LocalManager().find(cid, ComicType.local);
+        image = local != null
+            ? LocalComicImageProvider(local)
+            : CachedImageProvider(cover!, sourceKey: sourceKey, cid: cid);
+      } else if (sourceKey == 'webdav' ||
           cover!.startsWith('webdav://') ||
-          cover!.startsWith('file://')) {
-        image = cover!.startsWith('file://')
-            ? FileImage(File(cover!.substring(7)))
-            : WebDavImageProvider(cover!);
+          cover!.startsWith('stream://')) {
+        image = WebDavImageProvider(cover!);
       } else {
         image = CachedImageProvider(cover!, sourceKey: sourceKey, cid: cid);
       }
