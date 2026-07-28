@@ -30,7 +30,7 @@ class _AppSettingsState extends State<AppSettings> {
         ListTile(
           title: Text("About storage location".tl),
           subtitle: Text(
-            "Default path is app private storage (no extra permission). To use Download/venera or other public folders, tap Set and pick that folder in the system file picker — only that folder is authorized, full phone storage access is not required."
+            "Default path is app private storage (no extra permission). To use public folders such as Download (e.g. Download/venera), tap Set and pick that folder in the system file picker. Only that folder is authorized — full phone storage access is not required. The folder may be empty or already contain comic folders."
                 .tl,
           ),
           isThreeLine: true,
@@ -66,16 +66,7 @@ class _AppSettingsState extends State<AppSettings> {
               context.showMessage(message: res);
             } else {
               if (!context.mounted) return;
-              final path = LocalManager().path;
-              final usedSub =
-                  path.endsWith('venera_local') ||
-                  path.endsWith(r'venera_local');
-              context.showMessage(
-                message: usedSub
-                    ? "Path set successfully. Non-empty folder → used @p"
-                          .tlParams({'p': path})
-                    : "Path set successfully".tl,
-              );
+              context.showMessage(message: "Path set successfully".tl);
               setState(() {});
             }
           },

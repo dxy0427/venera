@@ -226,37 +226,6 @@ class LocalManager with ChangeNotifier {
     }
   }
 
-  /// Files/dirs that do not count as "content" when validating a new storage path.
-  /// Android/iOS pickers and previous app installs often leave these behind.
-  static bool _isIgnorableStorageEntry(String name) {
-    if (name.isEmpty || name == '.' || name == '..') return true;
-    if (name.startsWith('.')) return true; // .nomedia, .DS_Store, .trash, ...
-    final lower = name.toLowerCase();
-    return lower == 'thumbs.db' ||
-        lower == 'desktop.ini' ||
-        lower == 'lost+found' ||
-        lower == '\$recycle.bin' ||
-        lower == 'system volume information';
-  }
-
-  Future<bool> _isEffectivelyEmpty(Directory dir) async {
-    try {
-      return await overrideIO(() async {
-        if (!dir.existsSync()) return true;
-        await for (final entity in dir.list(followLinks: false)) {
-          if (!_isIgnorableStorageEntry(entity.name)) {
-            return false;
-          }
-        }
-        return true;
-      });
-    } catch (e, s) {
-      Log.error("IO", "Failed to list directory for setNewPath: $e", s);
-      // Listing failed: do not block solely on "not empty"; write probe decides.
-      return true;
-    }
-  }
-
   Future<bool> _canWriteDirectory(String dirPath) async {
     try {
       return await overrideIO(() async {
@@ -285,43 +254,22 @@ class LocalManager with ChangeNotifier {
     return s;
   }
 
-  /// Prefer [base]/venera_local when [base] already has user files.
+  /// Ensure [picked] exists (create if needed) and return normalized path.
+  /// Non-empty folders are allowed — user may already keep comics there.
   Future<String?> _resolveStorageRoot(String picked) async {
     final base = _normalizeDirPath(picked);
     final baseDir = Directory(base);
-    if (!await overrideIO(() async => baseDir.existsSync())) {
-      try {
-        await overrideIO(() async {
-          baseDir.createSync(recursive: true);
-        });
-      } catch (e, s) {
-        Log.error("IO", e, s);
-        return null;
-      }
-    }
-
-    if (await _isEffectivelyEmpty(baseDir)) {
-      return base;
-    }
-
-    // Picked folder has real content: use a dedicated subfolder to avoid mixing.
-    final sub = FilePath.join(base, 'venera_local');
-    final subDir = Directory(sub);
     try {
       await overrideIO(() async {
-        if (!subDir.existsSync()) {
-          subDir.createSync(recursive: true);
+        if (!baseDir.existsSync()) {
+          baseDir.createSync(recursive: true);
         }
       });
     } catch (e, s) {
       Log.error("IO", e, s);
       return null;
     }
-    if (!await _isEffectivelyEmpty(subDir)) {
-      // Subfolder already used by another install with comics — still OK to reuse.
-      // Only reject if we cannot write.
-    }
-    return sub;
+    return base;
   }
 
   // return error message if failed
@@ -345,8 +293,17 @@ class LocalManager with ChangeNotifier {
     final oldDir = Directory(oldPath);
     final newDir = Directory(normalized);
     try {
+      // Migrate existing library into the new root (merge OK if target
+      // already has folders/files — e.g. user-prepared Download/venera).
       if (await overrideIO(() async => oldDir.existsSync())) {
-        await copyDirectoryIsolate(oldDir, newDir);
+        final oldNorm = _normalizeDirPath(oldPath);
+        if (oldNorm != normalized &&
+            !normalized.startsWith('$oldNorm/') &&
+            !normalized.startsWith('$oldNorm\\') &&
+            !oldNorm.startsWith('$normalized/') &&
+            !oldNorm.startsWith('$normalized\\')) {
+          await copyDirectoryIsolate(oldDir, newDir);
+        }
       }
       await File(
         FilePath.join(App.dataPath, 'local_path'),
@@ -356,11 +313,21 @@ class LocalManager with ChangeNotifier {
       return e.toString();
     }
     path = normalized;
-    _checkNoMedia();
-    // Best-effort cleanup of old location; do not fail the path switch.
     try {
-      if (oldPath != normalized &&
-          await overrideIO(() async => oldDir.existsSync())) {
+      await overrideIO(() async => _checkNoMedia());
+    } catch (e, s) {
+      Log.error("IO", "Failed to create .nomedia: $e", s);
+    }
+    // Best-effort cleanup of old location; do not fail the path switch.
+    // Skip if new path is inside old path (or vice versa) to avoid wiping data.
+    try {
+      final oldNorm = _normalizeDirPath(oldPath);
+      final safeToClean = oldNorm != normalized &&
+          !normalized.startsWith('$oldNorm/') &&
+          !normalized.startsWith('$oldNorm\\') &&
+          !oldNorm.startsWith('$normalized/') &&
+          !oldNorm.startsWith('$normalized\\');
+      if (safeToClean && await overrideIO(() async => oldDir.existsSync())) {
         await overrideIO(() async {
           await oldDir.deleteContents(recursive: true);
         });
