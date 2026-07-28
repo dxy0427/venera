@@ -15,6 +15,7 @@ import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/background_download.dart';
 import 'package:venera/utils/natural_sort.dart';
+import 'package:venera/utils/translations.dart';
 
 import 'app.dart';
 import 'history.dart';
@@ -225,27 +226,98 @@ class LocalManager with ChangeNotifier {
     }
   }
 
+  /// Files/dirs that do not count as "content" when validating a new storage path.
+  /// Android/iOS pickers and previous app installs often leave these behind.
+  static bool _isIgnorableStorageEntry(String name) {
+    if (name.isEmpty || name == '.' || name == '..') return true;
+    if (name.startsWith('.')) return true; // .nomedia, .DS_Store, .trash, ...
+    final lower = name.toLowerCase();
+    return lower == 'thumbs.db' ||
+        lower == 'desktop.ini' ||
+        lower == 'lost+found' ||
+        lower == '\$recycle.bin' ||
+        lower == 'system volume information';
+  }
+
+  Future<bool> _isEffectivelyEmpty(Directory dir) async {
+    try {
+      await for (final entity in dir.list(followLinks: false)) {
+        if (!_isIgnorableStorageEntry(entity.name)) {
+          return false;
+        }
+      }
+      return true;
+    } catch (e, s) {
+      Log.error("IO", "Failed to list directory for setNewPath: $e", s);
+      return false;
+    }
+  }
+
   // return error message if failed
   Future<String?> setNewPath(String newPath) async {
-    var newDir = Directory(newPath);
+    // Normalize trailing separators for comparison.
+    var normalized = newPath;
+    while (normalized.length > 1 &&
+        (normalized.endsWith('/') || normalized.endsWith('\\'))) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    var current = path;
+    while (current.length > 1 &&
+        (current.endsWith('/') || current.endsWith('\\'))) {
+      current = current.substring(0, current.length - 1);
+    }
+    if (normalized == current) {
+      return null;
+    }
+
+    var newDir = Directory(normalized);
     if (!await newDir.exists()) {
-      return "Directory does not exist";
+      try {
+        await newDir.create(recursive: true);
+      } catch (e, s) {
+        Log.error("IO", e, s);
+        return "Directory does not exist".tl;
+      }
     }
-    if (!await newDir.list().isEmpty) {
-      return "Directory is not empty";
+    if (!await _isEffectivelyEmpty(newDir)) {
+      return "Directory is not empty. Choose an empty folder (hidden files like .nomedia are OK)."
+          .tl;
     }
+
+    // Ensure we can write in the destination before migrating.
     try {
-      await copyDirectoryIsolate(directory, newDir);
+      final probe = File(FilePath.join(normalized, '.venera_write_test'));
+      await probe.writeAsString('ok');
+      await probe.delete();
+    } catch (e, s) {
+      Log.error("IO", e, s);
+      return "No write permission for the selected directory".tl;
+    }
+
+    final oldPath = path;
+    final oldDir = Directory(oldPath);
+    try {
+      if (await oldDir.exists()) {
+        await copyDirectoryIsolate(oldDir, newDir);
+      }
       await File(
         FilePath.join(App.dataPath, 'local_path'),
-      ).writeAsString(newPath);
+      ).writeAsString(normalized);
     } catch (e, s) {
       Log.error("IO", e, s);
       return e.toString();
     }
-    await directory.deleteContents(recursive: true);
-    path = newPath;
+    path = normalized;
     _checkNoMedia();
+    // Best-effort cleanup of old location; do not fail the path switch.
+    try {
+      if (oldPath != normalized && await oldDir.exists()) {
+        await oldDir.deleteContents(recursive: true);
+      }
+    } catch (e, s) {
+      Log.error("IO", "Failed to clean old local path: $e", s);
+    }
+    notifyListeners();
     return null;
   }
 
