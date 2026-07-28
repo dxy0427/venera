@@ -14,7 +14,15 @@ import 'streaming_zip.dart';
 
 /// Supported image extensions for comic detection.
 const _imageExtensions = {
-  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.avif',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.tiff',
+  '.tif',
+  '.avif',
 };
 
 /// Supported archive extensions for comic detection.
@@ -175,23 +183,27 @@ class WebDavComicClient {
         if (isDir) {
           final dirPath = '$remotePath$name/';
           final isComic = await _isComicDirectory(dirPath);
-          entries.add(WebDavComicEntry(
-            name: _cleanName(name),
-            path: dirPath,
-            isDirectory: true,
-            size: item.size ?? 0,
-            modified: item.mTime,
-            isCategory: !isComic,
-          ));
+          entries.add(
+            WebDavComicEntry(
+              name: _cleanName(name),
+              path: dirPath,
+              isDirectory: true,
+              size: item.size ?? 0,
+              modified: item.mTime,
+              isCategory: !isComic,
+            ),
+          );
         } else if (_archiveExtensions.contains(ext)) {
           // Archive file - cbz/zip comic
-          entries.add(WebDavComicEntry(
-            name: _cleanName(name),
-            path: '$remotePath$name',
-            isDirectory: false,
-            size: item.size ?? 0,
-            modified: item.mTime,
-          ));
+          entries.add(
+            WebDavComicEntry(
+              name: _cleanName(name),
+              path: '$remotePath$name',
+              isDirectory: false,
+              size: item.size ?? 0,
+              modified: item.mTime,
+            ),
+          );
         }
       }
     } catch (e, s) {
@@ -210,10 +222,18 @@ class WebDavComicClient {
     final client = getClient();
     final images = <WebDavImageEntry>[];
     final coverNames = {
-      'cover.jpg', 'cover.jpeg', 'cover.png',
-      'folder.jpg', 'folder.jpeg', 'folder.png',
-      'thumb.jpg', 'thumb.jpeg', 'thumb.png',
-      '封面.jpg', '封面.jpeg', '封面.png',
+      'cover.jpg',
+      'cover.jpeg',
+      'cover.png',
+      'folder.jpg',
+      'folder.jpeg',
+      'folder.png',
+      'thumb.jpg',
+      'thumb.jpeg',
+      'thumb.png',
+      '封面.jpg',
+      '封面.jpeg',
+      '封面.png',
     };
 
     try {
@@ -226,11 +246,13 @@ class WebDavComicClient {
 
         final ext = _getExtension(name).toLowerCase();
         if (_imageExtensions.contains(ext)) {
-          images.add(WebDavImageEntry(
-            name: name,
-            path: '$dirPath$name',
-            size: item.size ?? 0,
-          ));
+          images.add(
+            WebDavImageEntry(
+              name: name,
+              path: '$dirPath$name',
+              size: item.size ?? 0,
+            ),
+          );
         }
       }
     } catch (e, s) {
@@ -271,11 +293,13 @@ class WebDavComicClient {
             // Ignore errors counting images
           }
 
-          chapters.add(WebDavChapter(
-            name: name,
-            path: '$dirPath$name/',
-            imageCount: imageCount,
-          ));
+          chapters.add(
+            WebDavChapter(
+              name: name,
+              path: '$dirPath$name/',
+              imageCount: imageCount,
+            ),
+          );
         }
       }
     } catch (e, s) {
@@ -350,11 +374,12 @@ class WebDavComicClient {
   }
 
   /// Load a cover image for a comic entry.
+  /// Sets [comic.coverPath] (may be stream:// for CBZ first-image covers).
   Future<Uint8List?> loadCover(WebDavComicEntry comic) async {
     final path = await resolveCoverPath(comic);
     if (path == null || path.isEmpty) return null;
     if (path.startsWith('stream://')) {
-      // Handled by provider stream loader.
+      // Bytes loaded later by WebDavProvider.loadImage / HistoryImageProvider.
       return null;
     }
     try {
@@ -431,10 +456,17 @@ class WebDavComicClient {
     final client = getClient();
     final files = <WebDavImageEntry>[];
     final coverNames = {
-      'cover.jpg', 'cover.jpeg', 'cover.png',
-      'folder.jpg', 'folder.jpeg', 'folder.png',
-      'thumb.jpg', 'thumb.jpeg', 'thumb.png',
-      'cover.cbz', 'folder.cbz',
+      'cover.jpg',
+      'cover.jpeg',
+      'cover.png',
+      'folder.jpg',
+      'folder.jpeg',
+      'folder.png',
+      'thumb.jpg',
+      'thumb.jpeg',
+      'thumb.png',
+      'cover.cbz',
+      'folder.cbz',
     };
 
     try {
@@ -445,11 +477,13 @@ class WebDavComicClient {
         if (coverNames.contains(name.toLowerCase())) continue;
         final ext = _getExtension(name).toLowerCase();
         if (_archiveExtensions.contains(ext)) {
-          files.add(WebDavImageEntry(
-            name: name,
-            path: '$dirPath$name',
-            size: item.size ?? 0,
-          ));
+          files.add(
+            WebDavImageEntry(
+              name: name,
+              path: '$dirPath$name',
+              size: item.size ?? 0,
+            ),
+          );
         }
       }
     } catch (e, s) {
@@ -471,22 +505,28 @@ class WebDavComicClient {
 
   static String buildEncodedUrl(String baseUrl, String remotePath) {
     final base = Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), ''));
-    final raw = remotePath.startsWith('/') ? remotePath.substring(1) : remotePath;
+    final raw = remotePath.startsWith('/')
+        ? remotePath.substring(1)
+        : remotePath;
     final extra = raw
         .split('/')
         .where((s) => s.isNotEmpty)
         .map(_decodeUrlSegment)
         .toList();
-    return base.replace(pathSegments: [...base.pathSegments, ...extra]).toString();
+    return base
+        .replace(pathSegments: [...base.pathSegments, ...extra])
+        .toString();
   }
 
-  Future<void> downloadFile(String remotePath, String localPath,
-      {void Function(int received, int total)? onProgress}) async {
+  Future<void> downloadFile(
+    String remotePath,
+    String localPath, {
+    void Function(int received, int total)? onProgress,
+  }) async {
     try {
-      final dio = AppDio(BaseOptions(
-        method: 'GET',
-        responseType: ResponseType.stream,
-      ));
+      final dio = AppDio(
+        BaseOptions(method: 'GET', responseType: ResponseType.stream),
+      );
 
       final config = getConfig();
       if (config == null) throw Exception('WebDAV not configured');
@@ -497,7 +537,8 @@ class WebDavComicClient {
         fullUrl,
         options: Options(
           headers: {
-            'authorization': 'Basic ${base64Encode(utf8.encode('${config[1]}:${config[2]}'))}',
+            'authorization':
+                'Basic ${base64Encode(utf8.encode('${config[1]}:${config[2]}'))}',
           },
         ),
       );
@@ -546,13 +587,26 @@ class WebDavComicClient {
 
   /// Special chapter prefixes that should sort AFTER regular chapters.
   static const _chapterSuffixesAfter = [
-    '后记', '后日谈', '番外', '特典', '附录',
-    'afterword', 'extra', 'bonus', 'omake', 'special',
+    '后记',
+    '后日谈',
+    '番外',
+    '特典',
+    '附录',
+    'afterword',
+    'extra',
+    'bonus',
+    'omake',
+    'special',
   ];
 
   /// Special chapter prefixes that should sort BEFORE regular chapters.
   static const _chapterSuffixesBefore = [
-    '预告', '预览', 'preview', 'prologue', '序章', '序幕',
+    '预告',
+    '预览',
+    'preview',
+    'prologue',
+    '序章',
+    '序幕',
   ];
 
   /// Extract the leading number from a chapter name, or -1 if none.
@@ -616,8 +670,9 @@ class WebDavComicClient {
     // Neither has number: natural sort on full string
     final aParts = _splitNatural(a);
     final bParts = _splitNatural(b);
-    final minLen =
-        aParts.length < bParts.length ? aParts.length : bParts.length;
+    final minLen = aParts.length < bParts.length
+        ? aParts.length
+        : bParts.length;
     for (int i = 0; i < minLen; i++) {
       final aIsNum = int.tryParse(aParts[i]) != null;
       final bIsNum = int.tryParse(bParts[i]) != null;

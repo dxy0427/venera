@@ -43,6 +43,7 @@ class WebDavComicsPage extends StatefulWidget {
 
 class _WebDavComicsPageState extends State<WebDavComicsPage> {
   WebDavSortMode _sortMode = WebDavSortMode.titleAsc;
+
   /// Display titles from info.json (path -> title).
   final Map<String, String> _infoTitles = {};
 
@@ -161,13 +162,9 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
               child: Center(child: CircularProgressIndicator()),
             )
           else if (provider.error != null)
-            SliverFillRemaining(
-              child: _buildError(provider.error!),
-            )
+            SliverFillRemaining(child: _buildError(provider.error!))
           else if (_currentComics.isEmpty)
-            SliverFillRemaining(
-              child: _buildEmpty(),
-            )
+            SliverFillRemaining(child: _buildEmpty())
           else
             _buildComicGrid(_currentComics),
         ],
@@ -246,8 +243,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
     );
   }
 
-  String _displayTitle(WebDavComicEntry c) =>
-      _infoTitles[c.path] ?? c.name;
+  String _displayTitle(WebDavComicEntry c) => _infoTitles[c.path] ?? c.name;
 
   Future<void> _loadInfoTitles(List<WebDavComicEntry> comics) async {
     var changed = false;
@@ -276,23 +272,25 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       if (!a.isCategory && b.isCategory) return 1;
       switch (_sortMode) {
         case WebDavSortMode.titleAsc:
-          return _displayTitle(a)
-              .toLowerCase()
-              .compareTo(_displayTitle(b).toLowerCase());
+          return _displayTitle(
+            a,
+          ).toLowerCase().compareTo(_displayTitle(b).toLowerCase());
         case WebDavSortMode.titleDesc:
-          return _displayTitle(b)
-              .toLowerCase()
-              .compareTo(_displayTitle(a).toLowerCase());
+          return _displayTitle(
+            b,
+          ).toLowerCase().compareTo(_displayTitle(a).toLowerCase());
         case WebDavSortMode.nameAsc:
           return a.name.compareTo(b.name);
         case WebDavSortMode.nameDesc:
           return b.name.compareTo(a.name);
         case WebDavSortMode.dateAsc:
-          return (a.modified ?? DateTime(2000))
-              .compareTo(b.modified ?? DateTime(2000));
+          return (a.modified ?? DateTime(2000)).compareTo(
+            b.modified ?? DateTime(2000),
+          );
         case WebDavSortMode.dateDesc:
-          return (b.modified ?? DateTime(2000))
-              .compareTo(a.modified ?? DateTime(2000));
+          return (b.modified ?? DateTime(2000)).compareTo(
+            a.modified ?? DateTime(2000),
+          );
         case WebDavSortMode.sizeAsc:
           if (a.isDirectory && !b.isDirectory) return 1;
           if (!a.isDirectory && b.isDirectory) return -1;
@@ -315,17 +313,14 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
         mainAxisSpacing: 8,
         crossAxisSpacing: 8,
       ),
-      delegate: SliverChildBuilderDelegate(
-        (context, index) {
-          if (index >= sorted.length) return null;
-          return _WebDavComicCard(
-            comic: sorted[index],
-            title: _displayTitle(sorted[index]),
-            onTap: () => _openComic(sorted[index]),
-          );
-        },
-        childCount: sorted.length,
-      ),
+      delegate: SliverChildBuilderDelegate((context, index) {
+        if (index >= sorted.length) return null;
+        return _WebDavComicCard(
+          comic: sorted[index],
+          title: _displayTitle(sorted[index]),
+          onTap: () => _openComic(sorted[index]),
+        );
+      }, childCount: sorted.length),
     );
   }
 
@@ -339,13 +334,15 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       _navigateTo(comic.path, comic.name);
     } else {
       // Open standard ComicPage (same UI as network sources)
-      final cover = comic.coverPath == null
-          ? null
-          : (comic.coverPath!.startsWith('webdav://') ||
-                  comic.coverPath!.startsWith('file://') ||
-                  comic.coverPath!.startsWith('http')
-              ? comic.coverPath
-              : 'webdav://${comic.coverPath}');
+      final raw = comic.coverPath;
+      final cover = raw == null || raw.isEmpty
+          ? (!comic.isDirectory ? 'stream://${comic.path}' : null)
+          : (raw.startsWith('webdav://') ||
+                    raw.startsWith('stream://') ||
+                    raw.startsWith('file://') ||
+                    raw.startsWith('http')
+                ? raw
+                : 'webdav://$raw');
       context.to(
         () => ComicPage(
           id: comic.path,
@@ -379,9 +376,7 @@ class _WebDavComicCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: _buildCover(context),
-            ),
+            Expanded(child: _buildCover(context)),
             Padding(
               padding: const EdgeInsets.all(8),
               child: Column(

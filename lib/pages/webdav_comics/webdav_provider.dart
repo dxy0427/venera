@@ -121,11 +121,7 @@ class WebDavProvider with ChangeNotifier {
     final cbzFiles = await _client.listCbzFiles(dirPath);
     if (cbzFiles.isNotEmpty) {
       return cbzFiles
-          .map((f) => WebDavChapter(
-                name: f.name,
-                path: f.path,
-                imageCount: 0,
-              ))
+          .map((f) => WebDavChapter(name: f.name, path: f.path, imageCount: 0))
           .toList();
     }
     return [];
@@ -311,7 +307,14 @@ class WebDavProvider with ChangeNotifier {
 
   List<String> _listLocalImages(Directory dir) {
     final imageExtensions = {
-      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.tiff',
+      '.tif',
     };
     final files = <File>[];
     for (final entity in dir.listSync()) {
@@ -335,8 +338,9 @@ class WebDavProvider with ChangeNotifier {
   static int _naturalCompare(String a, String b) {
     final aParts = _splitNatural(a);
     final bParts = _splitNatural(b);
-    final minLen =
-        aParts.length < bParts.length ? aParts.length : bParts.length;
+    final minLen = aParts.length < bParts.length
+        ? aParts.length
+        : bParts.length;
     for (int i = 0; i < minLen; i++) {
       final aIsNum = int.tryParse(aParts[i]) != null;
       final bIsNum = int.tryParse(bParts[i]) != null;
@@ -370,11 +374,15 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load an image from WebDAV or streaming CBZ with caching.
   Future<Uint8List> loadImage(String path) async {
+    // Repair legacy double-prefixed stream covers.
+    if (path.startsWith('webdav://stream://')) {
+      path = path.substring(8);
+    }
     // Local extracted images (offline fallback)
     if (path.startsWith('file://')) {
       return File(path.substring(7)).readAsBytes();
     }
-    // Streaming CBZ entry / cover
+    // Streaming CBZ entry / cover (first image when no ::entry)
     if (path.startsWith('stream://')) {
       return loadStreamImage(path);
     }
@@ -413,22 +421,26 @@ class WebDavProvider with ChangeNotifier {
         if (isDir) {
           // Check if this directory is a comic or a category
           final isComic = await _isComicDirectory('$path$name/');
-          entries.add(WebDavComicEntry(
-            name: name,
-            path: '$path$name/',
-            isDirectory: true,
-            size: item.size ?? 0,
-            modified: item.mTime,
-            isCategory: !isComic,
-          ));
+          entries.add(
+            WebDavComicEntry(
+              name: name,
+              path: '$path$name/',
+              isDirectory: true,
+              size: item.size ?? 0,
+              modified: item.mTime,
+              isCategory: !isComic,
+            ),
+          );
         } else if (_client.isArchive(ext)) {
-          entries.add(WebDavComicEntry(
-            name: _client.cleanName(name),
-            path: '$path$name',
-            isDirectory: false,
-            size: item.size ?? 0,
-            modified: item.mTime,
-          ));
+          entries.add(
+            WebDavComicEntry(
+              name: _client.cleanName(name),
+              path: '$path$name',
+              isDirectory: false,
+              size: item.size ?? 0,
+              modified: item.mTime,
+            ),
+          );
         }
       }
 
@@ -492,7 +504,9 @@ class WebDavProvider with ChangeNotifier {
     if (cached != null) {
       try {
         final bytes = await cached.readAsBytes();
-        final content = utf8.decode(bytes, allowMalformed: true).replaceFirst('\uFEFF', '');
+        final content = utf8
+            .decode(bytes, allowMalformed: true)
+            .replaceFirst('\uFEFF', '');
         final json = Map<String, dynamic>.from(
           const JsonDecoder().convert(content) as Map,
         );
@@ -508,7 +522,9 @@ class WebDavProvider with ChangeNotifier {
 
       await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
 
-      final content = utf8.decode(data, allowMalformed: true).replaceFirst('\uFEFF', '');
+      final content = utf8
+          .decode(data, allowMalformed: true)
+          .replaceFirst('\uFEFF', '');
       final json = Map<String, dynamic>.from(
         const JsonDecoder().convert(content) as Map,
       );
@@ -527,9 +543,5 @@ class _StreamInfo {
   final StreamingZipReader reader;
   final List<ZipEntryInfo> entries;
 
-  _StreamInfo({
-    required this.reader,
-    required this.entries,
-  });
+  _StreamInfo({required this.reader, required this.entries});
 }
-

@@ -13,13 +13,27 @@ ImageProvider? _findImageProvider(Comic comic) {
     }
     image = FileImage(localComic.coverFile);
   } else if (comic.sourceKey == 'webdav') {
-    final cover = comic.cover;
+    var cover = comic.cover;
+    if (cover.startsWith('webdav://stream://')) {
+      cover = cover.substring(8);
+    }
     if (cover.startsWith('file://')) {
       image = FileImage(File(cover.substring(7)));
     } else if (cover.isNotEmpty) {
       image = WebDavImageProvider(cover);
     } else {
-      image = WebDavImageProvider(comic.id);
+      // No stored cover: stream first image for archives, else path as file.
+      final id = comic.id;
+      final lower = id.toLowerCase();
+      if (lower.endsWith('.cbz') ||
+          lower.endsWith('.zip') ||
+          lower.endsWith('.cbr')) {
+        image = WebDavImageProvider('stream://$id');
+      } else {
+        image = WebDavImageProvider(
+          id.startsWith('webdav://') ? id : 'webdav://$id',
+        );
+      }
     }
   } else {
     image = CachedImageProvider(

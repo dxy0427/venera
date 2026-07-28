@@ -32,7 +32,29 @@ class HistoryImageProvider
     // WebDAV covers (remote path / stream / webdav://)
     if (history.type == ComicType.webdav) {
       checkStop();
-      final cover = url.isNotEmpty ? url : history.id;
+      var cover = url.isNotEmpty ? url : history.id;
+      // Empty/legacy cover: CBZ/ZIP must stream first image, not fetch archive bytes.
+      if (cover.isEmpty ||
+          (!cover.startsWith('stream://') &&
+              !cover.startsWith('webdav://') &&
+              !cover.startsWith('file://') &&
+              !cover.startsWith('http'))) {
+        final id = cover.isNotEmpty ? cover : history.id;
+        final lower = id.toLowerCase();
+        if (lower.endsWith('.cbz') ||
+            lower.endsWith('.zip') ||
+            lower.endsWith('.cbr')) {
+          cover = 'stream://$id';
+        } else if (!id.startsWith('webdav://')) {
+          cover = 'webdav://$id';
+        } else {
+          cover = id;
+        }
+      }
+      // Repair double-prefixed stream covers from older builds.
+      if (cover.startsWith('webdav://stream://')) {
+        cover = cover.substring(8);
+      }
       return WebDavProvider().loadImage(cover);
     }
     if (!url.contains('/')) {
