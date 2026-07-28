@@ -427,11 +427,19 @@ class _LocalState extends State<_Local> {
                 comics: local,
                 heroTagPrefix: 'local_',
                 onItemTap: (comic, heroID) {
+                  final localComic = comic is LocalComic
+                      ? comic
+                      : LocalManager().find(
+                          comic.id,
+                          ComicType.fromKey(comic.sourceKey),
+                        );
                   context.to(
                     () => ComicPage(
                       id: comic.id,
                       sourceKey: comic.sourceKey,
-                      cover: 'file://${comic.coverFile.path}',
+                      cover: localComic != null
+                          ? 'file://${localComic.coverFile.path}'
+                          : comic.cover,
                       title: comic.title,
                       heroID: heroID,
                     ),
