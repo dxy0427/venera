@@ -8,6 +8,7 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/utils/io.dart';
 
+import 'webdav_accounts.dart';
 import 'webdav_models.dart';
 import 'streaming_zip.dart';
 
@@ -59,6 +60,10 @@ class WebDavComicClient {
   }
 
   List<String>? getConfig() {
+    final active = WebDavAccounts.active();
+    if (active != null && active.isValid) {
+      return active.configTriple;
+    }
     final config = appdata.settings['webdavComicSource'];
     if (config is List && config.whereType<String>().length == 3) {
       final values = config.whereType<String>().toList();
@@ -81,6 +86,10 @@ class WebDavComicClient {
   bool get isConfigured => getConfig() != null;
 
   String get remotePath {
+    final active = WebDavAccounts.active();
+    if (active != null) {
+      return active.normalizedPath;
+    }
     final path = appdata.settings['webdavComicPath'];
     if (path is String && path.trim().isNotEmpty) {
       return _normalizePath(path);
@@ -90,29 +99,60 @@ class WebDavComicClient {
 
   static String _normalizePath(String path) {
     var result = path.trim().replaceAll('\\', '/');
+    if (result.isEmpty) result = '/';
     if (!result.startsWith('/')) result = '/$result';
     if (!result.endsWith('/')) result = '$result/';
     return result;
   }
 
-  /// Save WebDAV comic source configuration.
+  /// Save WebDAV comic source configuration for the active account.
   static Future<void> saveConfig({
     required String url,
     required String user,
     required String pass,
     required String path,
+    String? name,
   }) async {
-    appdata.settings['webdavComicSource'] = [
-      url.trim(),
-      user.trim(),
-      pass.trim()
-    ];
-    appdata.settings['webdavComicPath'] = path.trim();
-    await appdata.saveData(false);
+    final active = WebDavAccounts.active();
+    if (active != null) {
+      active.url = url.trim();
+      active.user = user.trim();
+      active.pass = pass;
+      active.path = path;
+      if (name != null && name.trim().isNotEmpty) {
+        active.name = name.trim();
+      }
+      await WebDavAccounts.update(active);
+      return;
+    }
+    await WebDavAccounts.add(
+      name: name?.trim().isNotEmpty == true ? name!.trim() : 'WebDAV',
+      url: url,
+      user: user,
+      pass: pass,
+      path: path,
+    );
   }
 
   /// Test the connection.
-  Future<void> testConnection() async {
+  Future<void> testConnection({
+    String? url,
+    String? user,
+    String? pass,
+    String? path,
+  }) async {
+    if (url != null && url.trim().isNotEmpty) {
+      final client = webdav.newClient(
+        url.trim(),
+        user: (user ?? '').trim(),
+        password: pass ?? '',
+        adapter: RHttpAdapter(
+          enableProxy: appdata.settings['webdavProxyEnabled'] != false,
+        ),
+      );
+      await client.readDir(_normalizePath(path ?? '/'));
+      return;
+    }
     final client = getClient();
     await client.readDir(remotePath);
   }

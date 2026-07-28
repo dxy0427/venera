@@ -1,3 +1,4 @@
+import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/res.dart';
@@ -7,6 +8,7 @@ import 'comic_info.dart';
 import 'webdav_client.dart';
 import 'webdav_models.dart';
 import 'webdav_provider.dart';
+import 'webdav_settings_page.dart';
 
 /// Built-in WebDAV comic source (native Dart, not a JS config).
 ///
@@ -23,6 +25,16 @@ class WebDavBuiltinSource {
   static const exploreTitle = 'WebDAV Comics';
 
   static ComicSource create() {
+    final settings = <String, Map<String, dynamic>>{
+      'accounts': {
+        'title': 'Accounts',
+        'type': 'callback',
+        'buttonText': 'Manage',
+        'callback': (List args) {
+          return App.rootContext.to(() => const WebDavSettingsPage());
+        },
+      },
+    };
     return ComicSource(
       name,
       key,
@@ -51,9 +63,9 @@ class WebDavBuiltinSource {
                 if (e.isDirectory && e.isCategory) continue;
                 list.add(await _toComicAsync(e));
               }
-              // Default sort by display title (info.json title when present)
               list.sort(
-                (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+                (a, b) =>
+                    a.title.toLowerCase().compareTo(b.title.toLowerCase()),
               );
               return Res(list, subData: 1);
             } catch (e) {
@@ -96,7 +108,7 @@ class WebDavBuiltinSource {
         },
         null,
       ),
-      null, // settings
+      settings,
       loadComicInfo,
       null, // loadComicThumbnail
       loadComicPages,
@@ -117,6 +129,8 @@ class WebDavBuiltinSource {
         'zh_CN': {
           'WebDAV': 'WebDAV',
           'WebDAV Comics': 'WebDAV 漫画',
+          'Accounts': '账号',
+          'Manage': '管理',
           'Author': '作者',
           '作者': '作者',
           '题材': '题材',
@@ -128,6 +142,8 @@ class WebDavBuiltinSource {
         'zh_TW': {
           'WebDAV': 'WebDAV',
           'WebDAV Comics': 'WebDAV 漫畫',
+          'Accounts': '帳號',
+          'Manage': '管理',
           'Author': '作者',
           '作者': '作者',
           '题材': '題材',
@@ -139,6 +155,8 @@ class WebDavBuiltinSource {
         'en_US': {
           'WebDAV': 'WebDAV',
           'WebDAV Comics': 'WebDAV Comics',
+          'Accounts': 'Accounts',
+          'Manage': 'Manage',
           'Author': 'Author',
         },
       },

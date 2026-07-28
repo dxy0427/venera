@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/pages/webdav_comics/webdav_provider.dart';
 import 'package:venera/utils/translations.dart';
 import 'package:webdav_client/webdav_client.dart' as webdav;
 import 'package:venera/network/app_dio.dart';
 
+import 'webdav_accounts.dart';
 import 'webdav_client.dart';
 
-/// Settings page for configuring WebDAV comic source connection.
 class WebDavSettingsPage extends StatefulWidget {
   const WebDavSettingsPage({super.key});
 
@@ -17,6 +18,9 @@ class WebDavSettingsPage extends StatefulWidget {
 }
 
 class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
+  List<WebDavAccount> _accounts = [];
+  String? _activeId;
+  late TextEditingController _nameController;
   late TextEditingController _urlController;
   late TextEditingController _userController;
   late TextEditingController _passController;
@@ -24,43 +28,55 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
   bool _testing = false;
   String? _testResult;
   bool _testSuccess = false;
+  bool _editingNew = false;
 
   @override
   void initState() {
     super.initState();
-    _loadConfig();
+    _nameController = TextEditingController();
+    _urlController = TextEditingController();
+    _userController = TextEditingController();
+    _passController = TextEditingController();
+    _pathController = TextEditingController(text: '/');
+    _reload();
   }
 
-  void _loadConfig() {
-    final config = appdata.settings['webdavComicSource'];
-    String url = '', user = '', pass = '';
-    if (config is List && config.whereType<String>().length == 3) {
-      final values = config.whereType<String>().toList();
-      url = values[0];
-      user = values[1];
-      pass = values[2];
+  void _reload() {
+    _accounts = WebDavAccounts.list();
+    _activeId = WebDavAccounts.activeId();
+    final active = WebDavAccounts.active();
+    if (active != null && !_editingNew) {
+      _fill(active);
+    } else if (_accounts.isEmpty) {
+      _fillEmpty();
+      _editingNew = true;
     }
-    // Also try to pre-fill from data sync config if comic config is empty
-    if (url.isEmpty) {
-      final syncConfig = appdata.settings['webdav'];
-      if (syncConfig is List && syncConfig.whereType<String>().length == 3) {
-        final values = syncConfig.whereType<String>().toList();
-        url = values[0];
-        user = values[1];
-        pass = values[2];
-      }
-    }
-    final path = appdata.settings['webdavComicPath'];
-    _urlController = TextEditingController(text: url);
-    _userController = TextEditingController(text: user);
-    _passController = TextEditingController(text: pass);
-    _pathController = TextEditingController(
-      text: (path is String && path.isNotEmpty) ? path : '/comics/',
-    );
+    setState(() {});
+  }
+
+  void _fill(WebDavAccount a) {
+    _nameController.text = a.name;
+    _urlController.text = a.url;
+    _userController.text = a.user;
+    _passController.text = a.pass;
+    _pathController.text = a.path.isEmpty ? '/' : a.path;
+    _activeId = a.id;
+    _editingNew = false;
+  }
+
+  void _fillEmpty() {
+    _nameController.text = 'WebDAV ${_accounts.length + 1}';
+    _urlController.text = '';
+    _userController.text = '';
+    _passController.text = '';
+    _pathController.text = '/';
+    _activeId = null;
+    _editingNew = true;
   }
 
   @override
   void dispose() {
+    _nameController.dispose();
     _urlController.dispose();
     _userController.dispose();
     _passController.dispose();
@@ -73,18 +89,13 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
       _testing = true;
       _testResult = null;
     });
-
     try {
-      await WebDavComicClient.saveConfig(
+      await WebDavComicClient().testConnection(
         url: _urlController.text,
         user: _userController.text,
         pass: _passController.text,
         path: _pathController.text,
       );
-
-      final client = WebDavComicClient();
-      await client.testConnection();
-
       setState(() {
         _testSuccess = true;
         _testResult = 'Connection successful'.tl;
@@ -95,42 +106,90 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
         _testResult = e.toString();
       });
     } finally {
-      setState(() {
-        _testing = false;
-      });
+      setState(() => _testing = false);
     }
   }
 
   Future<void> _save() async {
-    await WebDavComicClient.saveConfig(
-      url: _urlController.text,
-      user: _userController.text,
-      pass: _passController.text,
-      path: _pathController.text,
-    );
+    final name = _nameController.text.trim().isEmpty
+        ? 'WebDAV'
+        : _nameController.text.trim();
+    final url = _urlController.text.trim();
+    if (url.isEmpty) {
+      context.showMessage(message: 'Please enter server URL first'.tl);
+      return;
+    }
+    if (_editingNew || _activeId == null) {
+      final account = await WebDavAccounts.add(
+        name: name,
+        url: url,
+        user: _userController.text,
+        pass: _passController.text,
+        path: _pathController.text,
+      );
+      _editingNew = false;
+      _activeId = account.id;
+    } else {
+      final account = WebDavAccount(
+        id: _activeId!,
+        name: name,
+        url: url,
+        user: _userController.text,
+        pass: _passController.text,
+        path: _pathController.text,
+      );
+      await WebDavAccounts.update(account);
+      await WebDavAccounts.setActive(account.id);
+    }
+    WebDavProvider().refresh();
+    _reload();
     if (mounted) {
       context.showMessage(message: 'Settings saved'.tl);
     }
   }
 
-  /// Open directory browser to select remote path.
+  Future<void> _deleteCurrent() async {
+    if (_editingNew || _activeId == null) {
+      _fillEmpty();
+      setState(() {});
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete'.tl),
+        content: Text('Delete this account?'.tl),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'.tl),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete'.tl),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await WebDavAccounts.remove(_activeId!);
+    WebDavProvider().refresh();
+    _editingNew = false;
+    _reload();
+    if (_accounts.isEmpty) {
+      _fillEmpty();
+      setState(() {});
+    }
+  }
+
   void _browsePath() async {
     final url = _urlController.text.trim();
     final user = _userController.text.trim();
-    final pass = _passController.text.trim();
+    final pass = _passController.text;
     if (url.isEmpty) {
       context.showMessage(message: 'Please enter server URL first'.tl);
       return;
     }
-
-    // Save config so the client can use it
-    await WebDavComicClient.saveConfig(
-      url: url,
-      user: user,
-      pass: pass,
-      path: _pathController.text,
-    );
-
     if (!mounted) return;
     showDialog(
       context: context,
@@ -159,13 +218,71 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
               icon: const Icon(Icons.arrow_back),
               onPressed: () => context.pop(),
             ),
+            actions: [
+              IconButton(
+                tooltip: 'Add account'.tl,
+                onPressed: () {
+                  setState(() {
+                    _fillEmpty();
+                    _testResult = null;
+                  });
+                },
+                icon: const Icon(Icons.add),
+              ),
+            ],
           ),
           SliverPadding(
             padding: const EdgeInsets.all(16),
             sliver: SliverList.list(
               children: [
-                _buildSectionHeader('Connection Settings'.tl),
+                _buildSectionHeader('Accounts'.tl),
                 const SizedBox(height: 8),
+                if (_accounts.isEmpty)
+                  Text('No accounts. Fill the form and save.'.tl, style: ts.s14)
+                else
+                  ..._accounts.map((a) {
+                    final selected = !_editingNew && a.id == _activeId;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        selected
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: selected
+                            ? context.colorScheme.primary
+                            : context.colorScheme.outline,
+                      ),
+                      title: Text(a.name),
+                      subtitle: Text(
+                        a.url.isEmpty ? '-' : a.url,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: selected
+                          ? Text('Active'.tl,
+                              style: ts.s12
+                                  .withColor(context.colorScheme.primary))
+                          : null,
+                      onTap: () async {
+                        await WebDavAccounts.setActive(a.id);
+                        WebDavProvider().refresh();
+                        _editingNew = false;
+                        _reload();
+                      },
+                    );
+                  }),
+                const SizedBox(height: 16),
+                _buildSectionHeader(
+                  _editingNew ? 'New Account'.tl : 'Edit Account'.tl,
+                ),
+                const SizedBox(height: 8),
+                _buildTextField(
+                  controller: _nameController,
+                  label: 'Name'.tl,
+                  hint: 'Home NAS',
+                  icon: Icons.badge_outlined,
+                ),
+                const SizedBox(height: 12),
                 _buildTextField(
                   controller: _urlController,
                   label: 'Server URL'.tl,
@@ -186,7 +303,6 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                   obscure: true,
                 ),
                 const SizedBox(height: 12),
-                // Path field with browse button
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -194,7 +310,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                       child: _buildTextField(
                         controller: _pathController,
                         label: 'Remote Path'.tl,
-                        hint: '/comics/',
+                        hint: '/',
                         icon: Icons.folder,
                       ),
                     ),
@@ -221,12 +337,13 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.wifi_find),
                         label: Text(
-                            _testing ? 'Testing...'.tl : 'Test Connection'.tl),
+                          _testing ? 'Testing...'.tl : 'Test Connection'.tl,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -238,6 +355,14 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _deleteCurrent,
+                  icon: const Icon(Icons.delete_outline),
+                  label: Text(
+                    _editingNew ? 'Clear form'.tl : 'Delete account'.tl,
+                  ),
                 ),
                 if (_testResult != null) ...[
                   const SizedBox(height: 12),
@@ -285,15 +410,12 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'WebDAV Comics allows you to browse and read comics '
-                        'directly from a WebDAV server without downloading them first.',
+                        'You can add multiple WebDAV accounts with different names, '
+                        'switch the active account, then browse comics from that server.',
                         style: ts.s14,
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        'Supported formats:'.tl,
-                        style: ts.s14.bold,
-                      ),
+                      Text('Supported formats:'.tl, style: ts.s14.bold),
                       Text(
                         '• Directory with image files (jpg, png, webp, etc.)\n'
                         '• Directory with chapter subdirectories\n'
@@ -340,7 +462,6 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
   }
 }
 
-/// Dialog for browsing WebDAV directories and selecting a path.
 class _DirectoryPickerDialog extends StatefulWidget {
   final String url;
   final String user;
@@ -384,6 +505,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
 
   String _normalizePath(String path) {
     var result = path.trim().replaceAll('\\', '/');
+    if (result.isEmpty) result = '/';
     if (!result.startsWith('/')) result = '/$result';
     if (!result.endsWith('/')) result = '$result/';
     return result;
@@ -425,7 +547,6 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
 
   void _goUp() {
     if (_currentPath == '/') return;
-    // Remove trailing slash, then find previous slash
     var withoutTrailing = _currentPath;
     if (withoutTrailing.endsWith('/')) {
       withoutTrailing =
@@ -445,7 +566,6 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
         height: 400,
         child: Column(
           children: [
-            // Current path display with navigation
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -459,8 +579,8 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
                     onPressed: _currentPath == '/' ? null : _goUp,
                     tooltip: 'Parent directory'.tl,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                        minWidth: 32, minHeight: 32),
+                    constraints:
+                        const BoxConstraints(minWidth: 32, minHeight: 32),
                   ),
                   const SizedBox(width: 4),
                   Expanded(
@@ -474,7 +594,6 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
               ),
             ),
             const SizedBox(height: 8),
-            // Directory listing
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -487,8 +606,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
                                   size: 36, color: Colors.red),
                               const SizedBox(height: 8),
                               Text(_error!,
-                                  style: ts.s14,
-                                  textAlign: TextAlign.center),
+                                  style: ts.s14, textAlign: TextAlign.center),
                               const SizedBox(height: 8),
                               TextButton(
                                 onPressed: _loadDir,
@@ -502,7 +620,8 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
                               child: Text(
                                 'No subdirectories'.tl,
                                 style: ts.s14.copyWith(
-                                    color: context.colorScheme.outline),
+                                  color: context.colorScheme.outline,
+                                ),
                               ),
                             )
                           : ListView.builder(

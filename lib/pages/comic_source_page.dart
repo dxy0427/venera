@@ -890,7 +890,12 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
                   size: 20,
                 ),
                 const SizedBox(width: 4),
-                Text(source.name, style: ts.s18),
+                Text(
+                  source.filePath.startsWith('builtin:')
+                      ? source.name.tl
+                      : source.name,
+                  style: ts.s18,
+                ),
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -926,32 +931,34 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
                   ).paddingLeft(4),
               ],
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Tooltip(
-                  message: "Edit".tl,
-                  child: IconButton(
-                    onPressed: () => widget.edit(source),
-                    icon: const Icon(Icons.edit_note),
+            trailing: source.filePath.startsWith('builtin:')
+                ? null
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Tooltip(
+                        message: "Edit".tl,
+                        child: IconButton(
+                          onPressed: () => widget.edit(source),
+                          icon: const Icon(Icons.edit_note),
+                        ),
+                      ),
+                      Tooltip(
+                        message: "Update".tl,
+                        child: IconButton(
+                          onPressed: () => widget.update(source),
+                          icon: const Icon(Icons.update),
+                        ),
+                      ),
+                      Tooltip(
+                        message: "Delete".tl,
+                        child: IconButton(
+                          onPressed: () => widget.delete(source),
+                          icon: const Icon(Icons.delete),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                Tooltip(
-                  message: "Update".tl,
-                  child: IconButton(
-                    onPressed: () => widget.update(source),
-                    icon: const Icon(Icons.update),
-                  ),
-                ),
-                Tooltip(
-                  message: "Delete".tl,
-                  child: IconButton(
-                    onPressed: () => widget.delete(source),
-                    icon: const Icon(Icons.delete),
-                  ),
-                ),
-              ],
-            ),
           ),
         ),
         SliverToBoxAdapter(

@@ -20,6 +20,7 @@
 
 library webdav_comics;
 
+export 'webdav_accounts.dart';
 export 'webdav_builtin_source.dart';
 export 'webdav_client.dart';
 export 'webdav_comics_page.dart';

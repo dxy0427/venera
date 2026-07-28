@@ -22,8 +22,7 @@ class WebDavProvider with ChangeNotifier {
 
   factory WebDavProvider() => _instance ??= WebDavProvider._();
 
-  final WebDavComicClient _client = WebDavComicClient();
-
+  WebDavComicClient _client = WebDavComicClient();
   List<WebDavComicEntry>? _comics;
   bool _isLoading = false;
   String? _error;
@@ -456,6 +455,9 @@ class WebDavProvider with ChangeNotifier {
 
   Future<void> refresh() async {
     _comics = null;
+    _directoryEntries = null;
+    _error = null;
+    _client = WebDavComicClient();
     await loadComics(forceRefresh: true);
   }
 
