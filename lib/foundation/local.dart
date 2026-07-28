@@ -337,7 +337,8 @@ class LocalManager with ChangeNotifier {
     }
 
     if (!await _canWriteDirectory(normalized)) {
-      return "No write permission for the selected directory".tl;
+      return "No write permission for the selected directory. On Android, pick the folder with the system file picker (e.g. Download/venera). Full storage permission is not required."
+          .tl;
     }
 
     final oldPath = path;
@@ -369,6 +370,12 @@ class LocalManager with ChangeNotifier {
     }
     notifyListeners();
     return null;
+  }
+
+  /// Move comics back to the app-private default path (no extra permission).
+  Future<String?> resetToDefaultPath() async {
+    final def = await findDefaultPath();
+    return setNewPath(def);
   }
 
   Future<String> findDefaultPath() async {

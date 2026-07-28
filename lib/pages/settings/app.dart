@@ -18,7 +18,7 @@ class _AppSettingsState extends State<AppSettings> {
         _SettingPartTitle(title: "Data".tl, icon: Icons.storage),
         ListTile(
           title: Text("Storage Path for local comics".tl),
-          subtitle: Text(LocalManager().path, softWrap: false),
+          subtitle: Text(LocalManager().path, softWrap: true),
           trailing: IconButton(
             icon: const Icon(Icons.copy),
             onPressed: () {
@@ -27,12 +27,23 @@ class _AppSettingsState extends State<AppSettings> {
             },
           ),
         ).toSliver(),
+        ListTile(
+          title: Text("About storage location".tl),
+          subtitle: Text(
+            "Default path is app private storage (no extra permission). To use Download/venera or other public folders, tap Set and pick that folder in the system file picker — only that folder is authorized, full phone storage access is not required."
+                .tl,
+          ),
+          isThreeLine: true,
+        ).toSliver(),
         _CallbackSetting(
           title: "Set New Storage Path".tl,
           actionTitle: "Set".tl,
           callback: () async {
             String? result;
             if (App.isAndroid) {
+              // System folder picker (SAF): grants durable access to the
+              // chosen tree only — e.g. Download/venera — without needing
+              // MANAGE_EXTERNAL_STORAGE / "all files access".
               var picker = DirectoryPicker();
               result = (await picker.pickDirectory())?.path;
             } else if (App.isIOS) {
@@ -56,14 +67,37 @@ class _AppSettingsState extends State<AppSettings> {
             } else {
               if (!context.mounted) return;
               final path = LocalManager().path;
-              final usedSub = path.endsWith('venera_local') ||
+              final usedSub =
+                  path.endsWith('venera_local') ||
                   path.endsWith(r'venera_local');
               context.showMessage(
                 message: usedSub
                     ? "Path set successfully. Non-empty folder → used @p"
-                        .tlParams({'p': path})
+                          .tlParams({'p': path})
                     : "Path set successfully".tl,
               );
+              setState(() {});
+            }
+          },
+        ).toSliver(),
+        _CallbackSetting(
+          title: "Reset to Default Storage Path".tl,
+          actionTitle: "Reset".tl,
+          callback: () async {
+            if (!App.rootContext.mounted) return;
+            final loadingDialog = showLoadingDialog(
+              App.rootContext,
+              barrierDismissible: false,
+              allowCancel: false,
+            );
+            final res = await LocalManager().resetToDefaultPath();
+            if (!App.rootContext.mounted) return;
+            loadingDialog.close();
+            if (!context.mounted) return;
+            if (res != null) {
+              context.showMessage(message: res);
+            } else {
+              context.showMessage(message: "Path set successfully".tl);
               setState(() {});
             }
           },
