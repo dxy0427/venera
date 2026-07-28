@@ -5,7 +5,9 @@ abstract mixin class _ComicPageActions {
 
   ComicDetails get comic;
 
-  ComicSource get comicSource => ComicSource.find(comic.sourceKey)!;
+  ComicSource? get comicSource =>
+      ComicSource.find(comic.sourceKey) ??
+      (comic.sourceKey == 'local' ? LocalBuiltinSource.source : null);
 
   History? get history;
 
@@ -17,7 +19,9 @@ abstract mixin class _ComicPageActions {
     if (isLiking) return;
     isLiking = true;
     update();
-    var res = await comicSource.likeOrUnlikeComic!(comic.id, isLiked);
+    final source = comicSource;
+    if (source == null || source.likeOrUnlikeComic == null) return;
+    var res = await source.likeOrUnlikeComic!(comic.id, isLiked);
     if (res.error) {
       if (!App.rootContext.mounted) return;
       App.rootContext.showMessage(message: res.errorMessage!);
@@ -43,7 +47,7 @@ abstract mixin class _ComicPageActions {
       id: comic.id,
       name: comic.title,
       coverPath: comic.cover,
-      author: comic.subTitle ?? comic.uploader ?? '',
+      author: comic.findAuthor() ?? comic.subTitle ?? comic.uploader ?? '',
       type: comic.comicType,
       tags: tags,
     );
@@ -144,7 +148,9 @@ abstract mixin class _ComicPageActions {
       return;
     }
 
-    if (comicSource.archiveDownloader != null) {
+    final source = comicSource;
+    if (source == null) return;
+    if (source.archiveDownloader != null) {
       bool useNormalDownload = false;
       List<ArchiveInfo>? archives;
       int selected = -1;
@@ -179,7 +185,7 @@ abstract mixin class _ComicPageActions {
                         onExpansionChanged: (b) {
                           if (!isLoading && b && archives == null) {
                             isLoading = true;
-                            comicSource.archiveDownloader!
+                            source.archiveDownloader!
                                 .getArchives(comic.id)
                                 .then((value) {
                                   if (value.success) {
@@ -223,8 +229,10 @@ abstract mixin class _ComicPageActions {
                       setState(() {
                         isGettingLink = true;
                       });
-                      var res = await comicSource.archiveDownloader!
-                          .getDownloadUrl(comic.id, archives![selected].id);
+                      var res = await source.archiveDownloader!.getDownloadUrl(
+                        comic.id,
+                        archives![selected].id,
+                      );
                       if (res.error) {
                         if (!App.rootContext.mounted) return;
                         App.rootContext.showMessage(message: res.errorMessage!);
@@ -258,11 +266,7 @@ abstract mixin class _ComicPageActions {
 
     if (comic.chapters == null) {
       LocalManager().addTask(
-        ImagesDownloadTask(
-          source: comicSource,
-          comicId: comic.id,
-          comic: comic,
-        ),
+        ImagesDownloadTask(source: source, comicId: comic.id, comic: comic),
       );
     } else {
       List<int>? selected;
@@ -290,7 +294,7 @@ abstract mixin class _ComicPageActions {
       if (!App.rootContext.mounted) return;
       LocalManager().addTask(
         ImagesDownloadTask(
-          source: comicSource,
+          source: source,
           comicId: comic.id,
           comic: comic,
           chapters: selected!.map((i) {
@@ -305,7 +309,7 @@ abstract mixin class _ComicPageActions {
   }
 
   void onTapTag(String tag, String namespace) {
-    var target = comicSource.handleClickTagEvent?.call(namespace, tag);
+    var target = comicSource?.handleClickTagEvent?.call(namespace, tag);
     var context = App.mainNavigatorKey!.currentContext!;
     target?.jump(context);
   }
@@ -350,14 +354,14 @@ abstract mixin class _ComicPageActions {
   }
 
   void showComments() {
-    showSideBar(
-      App.rootContext,
-      CommentsPage(data: comic, source: comicSource),
-    );
+    final source = comicSource;
+    if (source == null) return;
+    showSideBar(App.rootContext, CommentsPage(data: comic, source: source));
   }
 
   void starRating() {
-    if (!comicSource.isLogged) {
+    final source = comicSource;
+    if (source == null || !source.isLogged || source.starRatingFunc == null) {
       return;
     }
     var rating = 0.0;
@@ -391,25 +395,26 @@ abstract mixin class _ComicPageActions {
                           setState(() {
                             isLoading = true;
                           });
-                          comicSource.starRatingFunc!(comic.id, rating.round())
-                              .then((value) {
-                                if (value.success) {
-                                  if (!App.rootContext.mounted) return;
-                                  App.rootContext.showMessage(
-                                    message: "Success".tl,
-                                  );
-                                  Navigator.of(dialogContext).pop();
-                                } else {
-                                  if (!App.rootContext.mounted) return;
-                                  App.rootContext.showMessage(
-                                    message: value.errorMessage!,
-                                  );
-                                  if (!context.mounted) return;
-                                  setState(() {
-                                    isLoading = false;
-                                  });
-                                }
-                              });
+                          source.starRatingFunc!(comic.id, rating.round()).then(
+                            (value) {
+                              if (value.success) {
+                                if (!App.rootContext.mounted) return;
+                                App.rootContext.showMessage(
+                                  message: "Success".tl,
+                                );
+                                Navigator.of(dialogContext).pop();
+                              } else {
+                                if (!App.rootContext.mounted) return;
+                                App.rootContext.showMessage(
+                                  message: value.errorMessage!,
+                                );
+                                if (!context.mounted) return;
+                                setState(() {
+                                  isLoading = false;
+                                });
+                              }
+                            },
+                          );
                         },
                         child: Text("Submit".tl),
                       ),

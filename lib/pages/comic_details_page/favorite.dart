@@ -31,7 +31,7 @@ class _FavoritePanel extends StatefulWidget {
 
 class _FavoritePanelState extends State<_FavoritePanel>
     with SingleTickerProviderStateMixin {
-  late ComicSource comicSource;
+  late ComicSource? comicSource;
 
   late bool hasNetwork;
 
@@ -41,14 +41,14 @@ class _FavoritePanelState extends State<_FavoritePanel>
 
   @override
   void initState() {
-    // Built-in / special sources may still have a ComicSource (e.g. webdav).
-    // Fall back carefully when comicSource is null (local only).
-    comicSource = widget.type.comicSource ??
+    comicSource =
+        widget.type.comicSource ??
         ComicSource.find(widget.type.sourceKey) ??
-        (throw StateError('Comic source not found for ${widget.type.sourceKey}'));
+        (widget.type == ComicType.local ? LocalBuiltinSource.source : null);
     localFolders = LocalFavoritesManager().folderNames;
     added = LocalFavoritesManager().find(widget.cid, widget.type);
-    hasNetwork = comicSource.favoriteData != null && comicSource.isLogged;
+    hasNetwork =
+        comicSource?.favoriteData != null && (comicSource?.isLogged ?? false);
     super.initState();
   }
 
@@ -92,7 +92,7 @@ class _FavoriteList extends StatefulWidget {
   final void Function(bool?, bool?) onFavorite;
   final FavoriteItem favoriteItem;
   final String? updateTime;
-  final ComicSource comicSource;
+  final ComicSource? comicSource;
   final bool hasNetwork;
   final List<String> localFolders;
   final List<String> added;
@@ -121,7 +121,7 @@ class _FavoriteListState extends State<_FavoriteList> {
     final networkSection = widget.hasNetwork
         ? _NetworkSection(
             cid: widget.cid,
-            comicSource: widget.comicSource,
+            comicSource: widget.comicSource!,
             isFavorite: widget.isFavorite,
             onFavorite: (network) {
               widget.onFavorite(null, network);

@@ -9,6 +9,7 @@ import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/local_comics/export_dialog.dart';
 import 'package:venera/pages/local_comics/chapter_export.dart';
 import 'package:venera/pages/local_comics/import_dialog.dart';
+import 'package:venera/pages/local_comics/local_builtin_source.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
 import 'package:venera/utils/cbz.dart';
@@ -67,6 +68,23 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   void dispose() {
     LocalManager().removeListener(update);
     super.dispose();
+  }
+
+  Future<void> _openLocalComic(LocalComic comic, int heroID) async {
+    if (await LocalBuiltinSource.hasDetail(comic)) {
+      if (!mounted) return;
+      context.to(
+        () => ComicPage(
+          id: comic.id,
+          sourceKey: comic.sourceKey,
+          cover: 'file://${comic.coverFile.path}',
+          title: comic.title,
+          heroID: heroID,
+        ),
+      );
+    } else {
+      comic.read();
+    }
   }
 
   void sort() {
@@ -388,7 +406,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   c.id,
                   ComicType.fromKey(c.sourceKey),
                 )!;
-                comic.read();
+                _openLocalComic(comic, heroID);
               }
             },
             menuBuilder: (c) {

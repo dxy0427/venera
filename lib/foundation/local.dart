@@ -27,8 +27,7 @@ int _naturalCompare(String a, String b) {
 
   final aParts = _splitNatural(a);
   final bParts = _splitNatural(b);
-  final minLen =
-      aParts.length < bParts.length ? aParts.length : bParts.length;
+  final minLen = aParts.length < bParts.length ? aParts.length : bParts.length;
   for (int i = 0; i < minLen; i++) {
     final aIsNum = int.tryParse(aParts[i]) != null;
     final bIsNum = int.tryParse(bParts[i]) != null;
@@ -391,14 +390,20 @@ class LocalManager with ChangeNotifier {
   }
 
   List<LocalComic> getComics(LocalSortType sortType) {
+    final orderBy = switch (sortType) {
+      LocalSortType.name => 'title COLLATE NOCASE ASC',
+      LocalSortType.timeAsc => 'created_at ASC',
+      LocalSortType.timeDesc => 'created_at DESC',
+    };
     var res = _db.select('''
       SELECT * FROM comics
-      ORDER BY
-        ${sortType.value == 'name' ? 'title' : 'created_at'}
-        ${sortType.value == 'time_asc' ? 'ASC' : 'DESC'}
-      ;
+      ORDER BY $orderBy;
     ''');
-    return res.map((row) => LocalComic.fromRow(row)).toList();
+    final list = res.map((row) => LocalComic.fromRow(row)).toList();
+    if (sortType == LocalSortType.name) {
+      list.sort((a, b) => _naturalCompare(a.title, b.title));
+    }
+    return list;
   }
 
   LocalComic? find(String id, ComicType comicType) {
