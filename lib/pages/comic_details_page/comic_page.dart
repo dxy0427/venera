@@ -221,12 +221,12 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       if (localComic == null) {
         return const Res.error('Local comic not found');
       }
+      final localHistory = HistoryManager().find(widget.id, ComicType.local);
       if (await LocalBuiltinSource.hasDetail(localComic)) {
-        history = HistoryManager().find(widget.id, ComicType.local);
+        history = localHistory;
         return LocalBuiltinSource.loadComicInfo(widget.id);
       }
 
-      var history = HistoryManager().find(widget.id, ComicType.local);
       if (isFirst) {
         Future.microtask(() {
           if (!App.rootContext.mounted) return;
@@ -236,11 +236,11 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
               cid: widget.id,
               name: localComic.title,
               chapters: localComic.chapters,
-              initialPage: history?.page,
-              initialChapter: history?.ep,
-              initialChapterGroup: history?.group,
+              initialPage: localHistory?.page,
+              initialChapter: localHistory?.ep,
+              initialChapterGroup: localHistory?.group,
               history:
-                  history ??
+                  localHistory ??
                   History.fromModel(model: localComic, ep: 0, page: 0),
               author: localComic.subTitle ?? '',
               tags: localComic.tags,
