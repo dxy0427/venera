@@ -380,7 +380,13 @@ class WebDavComicClient {
       await tempFile.deleteIgnoreError();
       return data;
     } catch (e, s) {
-      Log.error("WebDavClient", "Failed to read image $path: $e\n$s");
+      // Missing optional files (info.json / cover) are normal — keep log quiet.
+      final msg = e.toString();
+      if (msg.contains('404') || msg.contains('Not found')) {
+        Log.info("WebDavClient", "Not found: $path");
+      } else {
+        Log.error("WebDavClient", "Failed to read image $path: $e\n$s");
+      }
       rethrow;
     }
   }
@@ -456,13 +462,20 @@ class WebDavComicClient {
     return files;
   }
 
+  /// Build a correctly encoded absolute URL.
+  ///
+  /// [Uri.pathSegments] must receive *decoded* segments; Uri encodes once
+  /// when serializing. Do NOT pre-call [Uri.encodeComponent] or paths become
+  /// double/triple-encoded (%25E5...) and 123pan returns 404.
   static String buildEncodedUrl(String baseUrl, String remotePath) {
-    final base = baseUrl.replaceAll(RegExp(r'/+$'), '');
-    final path = remotePath.startsWith('/') ? remotePath : '/$remotePath';
-    final uri = Uri.parse('$base$path');
-    final segments =
-        uri.pathSegments.map((s) => Uri.encodeComponent(s)).toList();
-    return uri.replace(pathSegments: segments).toString();
+    final base = Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), ''));
+    final raw = remotePath.startsWith('/') ? remotePath.substring(1) : remotePath;
+    final extra = raw
+        .split('/')
+        .where((s) => s.isNotEmpty)
+        .map(Uri.decodeComponent)
+        .toList();
+    return base.replace(pathSegments: [...base.pathSegments, ...extra]).toString();
   }
 
   /// Download a file from WebDAV to a local path.

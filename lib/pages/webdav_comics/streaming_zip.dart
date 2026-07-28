@@ -27,18 +27,11 @@ class StreamingZipReader {
         'authorization': 'Basic ${base64Encode(utf8.encode('$user:$pass'))}',
       };
 
-  /// Encode each path segment while keeping slashes.
-  static String encodeUrl(String url) {
-    final uri = Uri.parse(url);
-    final segments = uri.pathSegments
-        .map((s) => Uri.encodeComponent(s))
-        .toList();
-    return uri.replace(pathSegments: segments).toString();
-  }
-
   Future<String> _getCdnUrl() async {
     if (_cdnUrl != null) return _cdnUrl!;
-    final encoded = encodeUrl(webdavUrl);
+    // [webdavUrl] is expected to already be a correctly encoded absolute URL
+    // from [WebDavComicClient.buildEncodedUrl]. Do not encode again.
+    final target = webdavUrl;
     final dio = AppDio(
       BaseOptions(
         followRedirects: false,
@@ -54,7 +47,7 @@ class StreamingZipReader {
     );
     try {
       final response = await dio.head(
-        encoded,
+        target,
         options: Options(headers: _authHeaders),
       );
       final location = response.headers.value('location');
@@ -65,15 +58,14 @@ class StreamingZipReader {
         final cl = response.headers.value('content-length');
         if (cl != null) _fileSize = int.tryParse(cl);
       } else {
-        _cdnUrl = encoded;
+        _cdnUrl = target;
         _cdnNeedsAuth = true;
         final cl = response.headers.value('content-length');
         if (cl != null) _fileSize = int.tryParse(cl);
       }
     } catch (e) {
-      // Fall back to encoded original URL with auth.
       Log.warning("StreamingZip", "HEAD probe failed: $e");
-      _cdnUrl = encoded;
+      _cdnUrl = target;
       _cdnNeedsAuth = true;
     }
     return _cdnUrl!;

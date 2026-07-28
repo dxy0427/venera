@@ -166,7 +166,6 @@ class WebDavProvider with ChangeNotifier {
 
     final base = config[0].replaceAll(RegExp(r'/+$'), '');
     final fullPath = remotePath.startsWith('/') ? remotePath : '/$remotePath';
-    // Prefer encoded URL construction so spaces / CJK paths work on 123pan etc.
     final webdavUrl = WebDavComicClient.buildEncodedUrl(base, fullPath);
     final reader = StreamingZipReader(
       webdavUrl: webdavUrl,
