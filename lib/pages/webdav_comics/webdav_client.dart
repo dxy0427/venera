@@ -380,7 +380,6 @@ class WebDavComicClient {
       await tempFile.deleteIgnoreError();
       return data;
     } catch (e, s) {
-      // Missing optional files (info.json / cover) are normal — keep log quiet.
       final msg = e.toString();
       if (msg.contains('404') || msg.contains('Not found')) {
         Log.info("WebDavClient", "Not found: $path");
@@ -462,11 +461,6 @@ class WebDavComicClient {
     return files;
   }
 
-  /// Build a correctly encoded absolute URL.
-  ///
-  /// [Uri.pathSegments] must receive *decoded* segments; Uri encodes once
-  /// when serializing. Do NOT pre-call [Uri.encodeComponent] or paths become
-  /// double/triple-encoded (%25E5...) and 123pan returns 404.
   static String buildEncodedUrl(String baseUrl, String remotePath) {
     final base = Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), ''));
     final raw = remotePath.startsWith('/') ? remotePath.substring(1) : remotePath;
@@ -478,12 +472,9 @@ class WebDavComicClient {
     return base.replace(pathSegments: [...base.pathSegments, ...extra]).toString();
   }
 
-  /// Download a file from WebDAV to a local path.
-  /// [onProgress] receives bytes received and total bytes (-1 if unknown).
   Future<void> downloadFile(String remotePath, String localPath,
       {void Function(int received, int total)? onProgress}) async {
     try {
-      // Use dio for progress tracking
       final dio = AppDio(BaseOptions(
         method: 'GET',
         responseType: ResponseType.stream,

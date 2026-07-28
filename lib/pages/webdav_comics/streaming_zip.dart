@@ -29,8 +29,6 @@ class StreamingZipReader {
 
   Future<String> _getCdnUrl() async {
     if (_cdnUrl != null) return _cdnUrl!;
-    // [webdavUrl] is expected to already be a correctly encoded absolute URL
-    // from [WebDavComicClient.buildEncodedUrl]. Do not encode again.
     final target = webdavUrl;
     final dio = AppDio(
       BaseOptions(
@@ -53,7 +51,6 @@ class StreamingZipReader {
       final location = response.headers.value('location');
       if (location != null && location.startsWith('http')) {
         _cdnUrl = location;
-        // CDN redirect URLs are usually pre-signed and must not send Basic auth.
         _cdnNeedsAuth = false;
         final cl = response.headers.value('content-length');
         if (cl != null) _fileSize = int.tryParse(cl);
