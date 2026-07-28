@@ -7,12 +7,18 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
 
 /// Streaming ZIP reader via HTTP Range requests (no full-file download).
+///
+/// OpenList / AList style WebDAV often answers file GET/HEAD with 302 to a
+/// signed CDN URL. That CDN must be requested **without** Basic Auth.
 class StreamingZipReader {
   String? _cdnUrl;
   bool _cdnNeedsAuth = true;
   final String webdavUrl;
   final String user;
   final String pass;
+
+  /// Optional size from WebDAV PROPFIND (avoids another HEAD round-trip).
+  final int? knownFileSize;
 
   List<_ZipEntry>? _entries;
   int? _fileSize;
@@ -21,50 +27,97 @@ class StreamingZipReader {
     required this.webdavUrl,
     required this.user,
     required this.pass,
-  });
+    this.knownFileSize,
+  }) {
+    if (knownFileSize != null && knownFileSize! > 0) {
+      _fileSize = knownFileSize;
+    }
+  }
 
   Map<String, String> get _authHeaders => {
         'authorization': 'Basic ${base64Encode(utf8.encode('$user:$pass'))}',
       };
 
+  bool _isRedirect(int? s) =>
+      s == 301 || s == 302 || s == 303 || s == 307 || s == 308;
+
+  String? _absoluteLocation(Response response, String baseUrl) {
+    final raw = response.headers.value('location');
+    if (raw == null || raw.isEmpty) return null;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    return Uri.parse(baseUrl).resolve(raw).toString();
+  }
+
+  /// Resolve download URL. Prefer signed CDN from 302 Location; never keep
+  /// Auth when hopping to another host.
   Future<String> _getCdnUrl() async {
     if (_cdnUrl != null) return _cdnUrl!;
     final target = webdavUrl;
-    final dio = AppDio(
-      BaseOptions(
-        followRedirects: false,
-        validateStatus: (s) =>
-            s != null &&
-            (s < 400 ||
-                s == 301 ||
-                s == 302 ||
-                s == 303 ||
-                s == 307 ||
-                s == 308),
-      ),
-    );
-    try {
-      final response = await dio.head(
-        target,
-        options: Options(headers: _authHeaders),
+
+    Future<bool> probe(String method) async {
+      final dio = AppDio(
+        BaseOptions(
+          followRedirects: false,
+          validateStatus: (s) =>
+              s != null && (s < 400 || _isRedirect(s)),
+        ),
       );
-      final location = response.headers.value('location');
-      if (location != null && location.startsWith('http')) {
-        _cdnUrl = location;
-        _cdnNeedsAuth = false;
-        final cl = response.headers.value('content-length');
-        if (cl != null) _fileSize = int.tryParse(cl);
-      } else {
-        _cdnUrl = target;
-        _cdnNeedsAuth = true;
-        final cl = response.headers.value('content-length');
-        if (cl != null) _fileSize = int.tryParse(cl);
+      try {
+        final response = method == 'HEAD'
+            ? await dio.head(target, options: Options(headers: _authHeaders))
+            : await dio.get(
+                target,
+                options: Options(
+                  headers: {
+                    ..._authHeaders,
+                    'Range': 'bytes=0-0',
+                  },
+                  responseType: ResponseType.bytes,
+                ),
+              );
+        final location = _absoluteLocation(response, target);
+        if (location != null) {
+          _cdnUrl = location;
+          _cdnNeedsAuth = Uri.parse(location).host != Uri.parse(target).host;
+          // If hosts differ, CDN signed URLs must not carry Basic Auth.
+          if (Uri.parse(location).host != Uri.parse(target).host) {
+            _cdnNeedsAuth = false;
+          }
+          final cl = response.headers.value('content-length');
+          if (cl != null) _fileSize ??= int.tryParse(cl);
+          final cr = response.headers.value('content-range');
+          final m = RegExp(r'/(\d+)\s*$').firstMatch(cr ?? '');
+          if (m != null) _fileSize ??= int.tryParse(m.group(1)!);
+          return true;
+        }
+        if (response.statusCode != null &&
+            response.statusCode! >= 200 &&
+            response.statusCode! < 300) {
+          _cdnUrl = target;
+          _cdnNeedsAuth = true;
+          final cl = response.headers.value('content-length');
+          if (cl != null) _fileSize ??= int.tryParse(cl);
+          final cr = response.headers.value('content-range');
+          final m = RegExp(r'/(\d+)\s*$').firstMatch(cr ?? '');
+          if (m != null) _fileSize ??= int.tryParse(m.group(1)!);
+          return true;
+        }
+      } catch (e) {
+        Log.warning("StreamingZip", "$method probe failed: $e");
       }
-    } catch (e) {
-      Log.warning("StreamingZip", "HEAD probe failed: $e");
-      _cdnUrl = target;
-      _cdnNeedsAuth = true;
+      return false;
     }
+
+    if (await probe('HEAD')) return _cdnUrl!;
+    if (await probe('GET')) return _cdnUrl!;
+
+    // Last resort: keep WebDAV URL (may work for servers without CDN redirect).
+    Log.warning(
+      "StreamingZip",
+      "No CDN Location for $target; falling back to WebDAV URL",
+    );
+    _cdnUrl = target;
+    _cdnNeedsAuth = true;
     return _cdnUrl!;
   }
 
@@ -109,11 +162,16 @@ class StreamingZipReader {
         validateStatus: (s) => s != null && s >= 200 && s < 400,
       ),
     );
-    final response = await dio.head(url, options: Options(headers: headers));
-    final cl = response.headers.value('content-length');
-    if (cl != null) {
-      _fileSize = int.parse(cl);
-      return _fileSize!;
+
+    try {
+      final response = await dio.head(url, options: Options(headers: headers));
+      final cl = response.headers.value('content-length');
+      if (cl != null) {
+        _fileSize = int.parse(cl);
+        return _fileSize!;
+      }
+    } catch (e) {
+      Log.warning("StreamingZip", "size HEAD failed: $e");
     }
 
     // Some servers omit Content-Length on HEAD; probe with a tiny range.
@@ -128,7 +186,6 @@ class StreamingZipReader {
       ),
     );
     final cr = probe.headers.value('content-range');
-    // bytes 0-0/12345
     final m = RegExp(r'/(\d+)\s*$').firstMatch(cr ?? '');
     if (m != null) {
       _fileSize = int.parse(m.group(1)!);
@@ -208,7 +265,10 @@ class StreamingZipReader {
       pos += 46 + fnameLen + extraLen + commentLen;
     }
 
-    Log.info("StreamingZip", "Parsed ${_entries!.length} entries from $webdavUrl");
+    Log.info(
+      "StreamingZip",
+      "Parsed ${_entries!.length} entries from $webdavUrl",
+    );
   }
 
   Future<List<ZipEntryInfo>> listEntries() async {

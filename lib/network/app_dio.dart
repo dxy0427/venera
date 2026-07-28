@@ -182,14 +182,20 @@ class RHttpAdapter implements HttpClientAdapter {
 
   RHttpAdapter({this.enableProxy = true});
 
-  Future<rhttp.ClientSettings> get settings async {
+  Future<rhttp.ClientSettings> settingsFor(RequestOptions options) async {
     var proxy = enableProxy ? await getProxy() : null;
+    // Honor Dio's followRedirects. StreamingZip needs false so it can
+    // capture OpenList/AList 302 Location (CDN signed URL) without sending
+    // Basic Auth to the CDN host (which returns 403).
+    final redirects = options.followRedirects
+        ? const rhttp.RedirectSettings.limited(5)
+        : const rhttp.RedirectSettings.none();
 
     return rhttp.ClientSettings(
       proxySettings: proxy == null
           ? const rhttp.ProxySettings.noProxy()
           : rhttp.ProxySettings.proxy(proxy),
-      redirectSettings: const rhttp.RedirectSettings.limited(5),
+      redirectSettings: redirects,
       timeoutSettings: const rhttp.TimeoutSettings(
         connectTimeout: Duration(seconds: 15),
         keepAliveTimeout: Duration(seconds: 60),
@@ -237,7 +243,7 @@ class RHttpAdapter implements HttpClientAdapter {
     var res = await rhttp.Rhttp.request(
       method: rhttp.HttpMethod(options.method),
       url: options.uri.toString(),
-      settings: await settings,
+      settings: await settingsFor(options),
       expectBody: rhttp.HttpExpectBody.stream,
       body: requestStream == null ? null : rhttp.HttpBody.stream(requestStream),
       headers: rhttp.HttpHeaders.rawMap(
@@ -257,11 +263,16 @@ class RHttpAdapter implements HttpClientAdapter {
       headers[key] ??= [];
       headers[key]!.add(entry.$2);
     }
+    final code = res.statusCode;
     return ResponseBody(
       res.body,
-      res.statusCode,
-      statusMessage: _getStatusMessage(res.statusCode),
-      isRedirect: false,
+      code,
+      statusMessage: _getStatusMessage(code),
+      isRedirect: code == 301 ||
+          code == 302 ||
+          code == 303 ||
+          code == 307 ||
+          code == 308,
       headers: headers,
     );
   }
