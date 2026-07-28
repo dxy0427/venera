@@ -461,13 +461,21 @@ class WebDavComicClient {
     return files;
   }
 
+  static String _decodeUrlSegment(String segment) {
+    try {
+      return Uri.decodeComponent(segment);
+    } catch (_) {
+      return segment;
+    }
+  }
+
   static String buildEncodedUrl(String baseUrl, String remotePath) {
     final base = Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), ''));
     final raw = remotePath.startsWith('/') ? remotePath.substring(1) : remotePath;
     final extra = raw
         .split('/')
         .where((s) => s.isNotEmpty)
-        .map(Uri.decodeComponent)
+        .map(_decodeUrlSegment)
         .toList();
     return base.replace(pathSegments: [...base.pathSegments, ...extra]).toString();
   }
