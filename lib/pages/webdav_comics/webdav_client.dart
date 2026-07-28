@@ -7,6 +7,7 @@ import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/natural_sort.dart';
 
 import 'webdav_accounts.dart';
 import 'webdav_models.dart';
@@ -261,7 +262,7 @@ class WebDavComicClient {
     }
 
     // Sort naturally by name
-    images.sort((a, b) => _naturalCompare(a.name, b.name));
+    images.sort((a, b) => naturalCompare(a.name, b.name));
     return images;
   }
 
@@ -307,7 +308,7 @@ class WebDavComicClient {
       rethrow;
     }
 
-    chapters.sort((a, b) => _naturalCompare(a.name, b.name));
+    chapters.sort((a, b) => naturalCompare(a.name, b.name));
     return chapters;
   }
 
@@ -491,7 +492,7 @@ class WebDavComicClient {
       rethrow;
     }
 
-    files.sort((a, b) => _naturalCompare(a.name, b.name));
+    files.sort((a, b) => naturalCompare(a.name, b.name));
     return files;
   }
 
@@ -585,52 +586,6 @@ class WebDavComicClient {
     return cleaned;
   }
 
-  /// Special chapter prefixes that should sort AFTER regular chapters.
-  static const _chapterSuffixesAfter = [
-    '后记',
-    '后日谈',
-    '番外',
-    '特典',
-    '附录',
-    'afterword',
-    'extra',
-    'bonus',
-    'omake',
-    'special',
-  ];
-
-  /// Special chapter prefixes that should sort BEFORE regular chapters.
-  static const _chapterSuffixesBefore = [
-    '预告',
-    '预览',
-    'preview',
-    'prologue',
-    '序章',
-    '序幕',
-  ];
-
-  /// Extract the leading number from a chapter name, or -1 if none.
-  static int _extractChapterNumber(String name) {
-    final match = RegExp(r'^(\d+)').firstMatch(name);
-    if (match != null) return int.parse(match.group(1)!);
-    // Also match Chinese numerals like 第0话, 第1话
-    final match2 = RegExp(r'第(\d+)').firstMatch(name);
-    if (match2 != null) return int.parse(match2.group(1)!);
-    return -1;
-  }
-
-  /// 0 = before (预告), 1 = normal, 2 = after (后记)
-  static int _chapterGroup(String name) {
-    final lower = name.toLowerCase();
-    for (final suffix in _chapterSuffixesBefore) {
-      if (lower.startsWith(suffix)) return 0;
-    }
-    for (final suffix in _chapterSuffixesAfter) {
-      if (lower.startsWith(suffix)) return 2;
-    }
-    return 1;
-  }
-
   /// Get file extension (with dot).
   String getExtension(String name) {
     final dotIndex = name.lastIndexOf('.');
@@ -646,61 +601,4 @@ class WebDavComicClient {
 
   /// Clean directory/file name for display.
   String cleanName(String name) => _cleanName(name);
-
-  static int _naturalCompare(String a, String b) {
-    // Extract base name (remove extension)
-    final nameA = a.contains('.') ? a.substring(0, a.lastIndexOf('.')) : a;
-    final nameB = b.contains('.') ? b.substring(0, b.lastIndexOf('.')) : b;
-
-    final groupA = _chapterGroup(nameA);
-    final groupB = _chapterGroup(nameB);
-    final numA = _extractChapterNumber(nameA);
-    final numB = _extractChapterNumber(nameB);
-
-    // Different groups: before(0) < normal(1) < after(2)
-    if (groupA != groupB) return groupA.compareTo(groupB);
-
-    // Same group, both have numbers: sort by number
-    if (numA >= 0 && numB >= 0) return numA.compareTo(numB);
-
-    // One has number, one doesn't: number comes first
-    if (numA >= 0 && numB < 0) return -1;
-    if (numA < 0 && numB >= 0) return 1;
-
-    // Neither has number: natural sort on full string
-    final aParts = _splitNatural(a);
-    final bParts = _splitNatural(b);
-    final minLen = aParts.length < bParts.length
-        ? aParts.length
-        : bParts.length;
-    for (int i = 0; i < minLen; i++) {
-      final aIsNum = int.tryParse(aParts[i]) != null;
-      final bIsNum = int.tryParse(bParts[i]) != null;
-      if (aIsNum && bIsNum) {
-        final cmp = int.parse(aParts[i]).compareTo(int.parse(bParts[i]));
-        if (cmp != 0) return cmp;
-      } else {
-        final cmp = aParts[i].compareTo(bParts[i]);
-        if (cmp != 0) return cmp;
-      }
-    }
-    return aParts.length.compareTo(bParts.length);
-  }
-
-  static List<String> _splitNatural(String s) {
-    final parts = <String>[];
-    final buffer = StringBuffer();
-    bool? wasDigit;
-    for (int i = 0; i < s.length; i++) {
-      final isDigit = s[i].codeUnitAt(0) >= 48 && s[i].codeUnitAt(0) <= 57;
-      if (wasDigit != null && isDigit != wasDigit) {
-        parts.add(buffer.toString());
-        buffer.clear();
-      }
-      buffer.write(s[i]);
-      wasDigit = isDigit;
-    }
-    if (buffer.isNotEmpty) parts.add(buffer.toString());
-    return parts;
-  }
 }

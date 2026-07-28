@@ -8,6 +8,7 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:sqlite3/sqlite3.dart' as sql;
 import 'package:venera/utils/ext.dart';
+import 'package:venera/utils/natural_sort.dart';
 import 'package:venera/utils/translations.dart';
 import 'cbz.dart';
 import 'io.dart';
@@ -298,12 +299,12 @@ class ImportComic {
       return null;
     }
 
-    fileList.sort();
+    fileList.sort(naturalCompare);
     coverPath =
         fileList.firstWhereOrNull((l) => l.startsWith('cover')) ??
         fileList.first;
 
-    chapters.sort();
+    chapters.sort(naturalCompare);
     if (hasChapters && coverPath == '') {
       // use the first image in the first chapter as the cover
       var firstChapter = Directory('${directory.path}/${chapters.first}');

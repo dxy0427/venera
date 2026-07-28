@@ -9,47 +9,8 @@ import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/pages/local_comics/chapter_export.dart';
+import 'package:venera/utils/natural_sort.dart';
 import 'package:zip_flutter/zip_flutter.dart';
-
-/// Natural sort for mixed text+number strings.
-int _naturalCompare(String a, String b) {
-  var ai = int.tryParse(a.split('.').first);
-  var bi = int.tryParse(b.split('.').first);
-  if (ai != null && bi != null) return ai.compareTo(bi);
-  final aParts = _splitNatural(a);
-  final bParts = _splitNatural(b);
-  final minLen =
-      aParts.length < bParts.length ? aParts.length : bParts.length;
-  for (int i = 0; i < minLen; i++) {
-    final aIsNum = int.tryParse(aParts[i]) != null;
-    final bIsNum = int.tryParse(bParts[i]) != null;
-    if (aIsNum && bIsNum) {
-      final cmp = int.parse(aParts[i]).compareTo(int.parse(bParts[i]));
-      if (cmp != 0) return cmp;
-    } else {
-      final cmp = aParts[i].compareTo(bParts[i]);
-      if (cmp != 0) return cmp;
-    }
-  }
-  return aParts.length.compareTo(bParts.length);
-}
-
-List<String> _splitNatural(String s) {
-  final parts = <String>[];
-  final buffer = StringBuffer();
-  bool? wasDigit;
-  for (int i = 0; i < s.length; i++) {
-    final isDigit = s[i].codeUnitAt(0) >= 48 && s[i].codeUnitAt(0) <= 57;
-    if (wasDigit != null && isDigit != wasDigit) {
-      parts.add(buffer.toString());
-      buffer.clear();
-    }
-    buffer.write(s[i]);
-    wasDigit = isDigit;
-  }
-  if (buffer.isNotEmpty) parts.add(buffer.toString());
-  return parts;
-}
 
 class ComicMetaData {
   final String title;
@@ -181,7 +142,9 @@ abstract class CBZ {
       cache.deleteSync(recursive: true);
       throw Exception('No images found in the archive');
     }
-    files.sort((a, b) => _naturalCompare(a.basenameWithoutExt, b.basenameWithoutExt));
+    files.sort(
+      (a, b) => naturalCompare(a.basenameWithoutExt, b.basenameWithoutExt),
+    );
     var coverFile = files.firstWhereOrNull(
       (element) =>
           element.path.endsWith('cover.${element.path.split('.').last}'),
@@ -422,7 +385,7 @@ abstract class CBZ {
         files.add(entity);
       }
     }
-    files.sort((a, b) => _naturalCompare(a.name, b.name));
+    files.sort((a, b) => naturalCompare(a.name, b.name));
     return files.map((e) => "file://${e.path}").toList();
   }
 

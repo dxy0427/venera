@@ -14,50 +14,10 @@ import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/background_download.dart';
+import 'package:venera/utils/natural_sort.dart';
 
 import 'app.dart';
 import 'history.dart';
-
-/// Natural sort that handles mixed text+number strings.
-/// E.g. "第2话" < "第12话", "001.jpg" < "002.jpg" < "100.jpg"
-int _naturalCompare(String a, String b) {
-  var ai = int.tryParse(a.split('.').first);
-  var bi = int.tryParse(b.split('.').first);
-  if (ai != null && bi != null) return ai.compareTo(bi);
-
-  final aParts = _splitNatural(a);
-  final bParts = _splitNatural(b);
-  final minLen = aParts.length < bParts.length ? aParts.length : bParts.length;
-  for (int i = 0; i < minLen; i++) {
-    final aIsNum = int.tryParse(aParts[i]) != null;
-    final bIsNum = int.tryParse(bParts[i]) != null;
-    if (aIsNum && bIsNum) {
-      final cmp = int.parse(aParts[i]).compareTo(int.parse(bParts[i]));
-      if (cmp != 0) return cmp;
-    } else {
-      final cmp = aParts[i].compareTo(bParts[i]);
-      if (cmp != 0) return cmp;
-    }
-  }
-  return aParts.length.compareTo(bParts.length);
-}
-
-List<String> _splitNatural(String s) {
-  final parts = <String>[];
-  final buffer = StringBuffer();
-  bool? wasDigit;
-  for (int i = 0; i < s.length; i++) {
-    final isDigit = s[i].codeUnitAt(0) >= 48 && s[i].codeUnitAt(0) <= 57;
-    if (wasDigit != null && isDigit != wasDigit) {
-      parts.add(buffer.toString());
-      buffer.clear();
-    }
-    buffer.write(s[i]);
-    wasDigit = isDigit;
-  }
-  if (buffer.isNotEmpty) parts.add(buffer.toString());
-  return parts;
-}
 
 class LocalComic with HistoryMixin implements Comic {
   @override
@@ -111,8 +71,8 @@ class LocalComic with HistoryMixin implements Comic {
       subtitle = row['subtitle'] as String,
       tags = List.from(jsonDecode(row['tags'] as String)),
       directory = row['directory'] as String,
-      chapters = ComicChapters.fromJsonOrNull(
-        jsonDecode(row['chapters'] as String),
+      chapters = _sortedLocalChapters(
+        ComicChapters.fromJsonOrNull(jsonDecode(row['chapters'] as String)),
       ),
       cover = row['cover'] as String,
       comicType = ComicType(row['comic_type'] as int),
@@ -120,6 +80,34 @@ class LocalComic with HistoryMixin implements Comic {
         jsonDecode(row['downloadedChapters'] as String),
       ),
       createdAt = DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int);
+
+  /// Re-order chapter map with chapter-aware natural sort so already-imported
+  /// comics (stored with plain lexicographic order) display correctly.
+  static ComicChapters? _sortedLocalChapters(ComicChapters? chapters) {
+    if (chapters == null) return null;
+    if (chapters.isGrouped) {
+      final grouped = <String, Map<String, String>>{};
+      for (final groupName in chapters.groups) {
+        final entries = chapters.getGroup(groupName).entries.toList()
+          ..sort(
+            (a, b) => naturalCompare(
+              a.value.isNotEmpty ? a.value : a.key,
+              b.value.isNotEmpty ? b.value : b.key,
+            ),
+          );
+        grouped[groupName] = Map.fromEntries(entries);
+      }
+      return ComicChapters.grouped(grouped);
+    }
+    final entries = chapters.allChapters.entries.toList()
+      ..sort(
+        (a, b) => naturalCompare(
+          a.value.isNotEmpty ? a.value : a.key,
+          b.value.isNotEmpty ? b.value : b.key,
+        ),
+      );
+    return ComicChapters(Map.fromEntries(entries));
+  }
 
   File get coverFile => File(FilePath.join(baseDir, cover));
 
@@ -401,7 +389,7 @@ class LocalManager with ChangeNotifier {
     ''');
     final list = res.map((row) => LocalComic.fromRow(row)).toList();
     if (sortType == LocalSortType.name) {
-      list.sort((a, b) => _naturalCompare(a.title, b.title));
+      list.sort((a, b) => naturalCompare(a.title, b.title));
     }
     return list;
   }
@@ -500,7 +488,7 @@ class LocalManager with ChangeNotifier {
         files.add(entity);
       }
     }
-    files.sort((a, b) => _naturalCompare(a.name, b.name));
+    files.sort((a, b) => naturalCompare(a.name, b.name));
     return files.map((e) => "file://${e.path}").toList();
   }
 
