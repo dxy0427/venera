@@ -108,17 +108,9 @@ class WebDavProvider with ChangeNotifier {
       final images = await _client.listImages(path);
       return images.map((e) => 'webdav://${e.path}').toList();
     } else {
-      // Always prefer streaming CBZ (range requests). Full download only
-      // as fallback when streaming is unavailable.
-      try {
-        return await _streamCbz(path);
-      } catch (e) {
-        Log.warning(
-          "WebDavProvider",
-          "Streaming failed, falling back to download: $e",
-        );
-        return _downloadAndExtractCbz(path);
-      }
+      // Stream CBZ via Range. Do not silently fall back to full download
+      // for huge archives — that blocks reading until the whole file is saved.
+      return await _streamCbz(path);
     }
   }
 
@@ -141,14 +133,10 @@ class WebDavProvider with ChangeNotifier {
 
   /// Get images for a specific chapter.
   Future<List<String>> getChapterImages(String chapterPath) async {
-    if (chapterPath.endsWith('.cbz') || chapterPath.endsWith('.zip')) {
-      // Try streaming first, fall back to download
-      try {
-        return await _streamCbz(chapterPath);
-      } catch (e) {
-        Log.warning("WebDavProvider", "Streaming failed, falling back to download: $e");
-        return _downloadAndExtractCbz(chapterPath);
-      }
+    if (chapterPath.endsWith('.cbz') ||
+        chapterPath.endsWith('.zip') ||
+        chapterPath.endsWith('.cbr')) {
+      return await _streamCbz(chapterPath);
     }
     final images = await _client.listImages(chapterPath);
     return images.map((e) => 'webdav://${e.path}').toList();
@@ -178,8 +166,10 @@ class WebDavProvider with ChangeNotifier {
 
     final base = config[0].replaceAll(RegExp(r'/+$'), '');
     final fullPath = remotePath.startsWith('/') ? remotePath : '/$remotePath';
+    // Prefer encoded URL construction so spaces / CJK paths work on 123pan etc.
+    final webdavUrl = WebDavComicClient.buildEncodedUrl(base, fullPath);
     final reader = StreamingZipReader(
-      webdavUrl: '$base$fullPath',
+      webdavUrl: webdavUrl,
       user: config[1],
       pass: config[2],
     );

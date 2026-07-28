@@ -84,10 +84,40 @@ class CacheManager {
         type TEXT
       )
     ''');
-    _scanDir(_db.handle, cachePath).then((value) {
-      _currentSize = value;
+    _scanDir(_db.handle, cachePath).then((value) async {
+      final extra = await _scanUnmanagedCacheDirs();
+      _currentSize = value + extra;
       checkCache();
     });
+  }
+
+  /// Include WebDAV offline extract dirs etc. that are outside the DB-managed tree.
+  Future<int> _scanUnmanagedCacheDirs() async {
+    var total = 0;
+    final dirs = <String>[
+      '${App.cachePath}/webdav_cbz',
+      '${App.cachePath}/webdav_covers',
+    ];
+    for (final p in dirs) {
+      final dir = Directory(p);
+      if (!await dir.exists()) continue;
+      try {
+        await for (final entity in dir.list(recursive: true, followLinks: false)) {
+          if (entity is File) {
+            total += await entity.length();
+          }
+        }
+      } catch (_) {}
+    }
+    return total;
+  }
+
+  /// Recalculate displayed cache size (managed + unmanaged).
+  Future<int> refreshSize() async {
+    final managed = await _scanDir(_db.handle, cachePath);
+    final extra = await _scanUnmanagedCacheDirs();
+    _currentSize = managed + extra;
+    return currentSize;
   }
 
   /// Get the singleton instance of CacheManager.
@@ -312,6 +342,15 @@ class CacheManager {
   Future<void> clear() async {
     await Directory(cachePath).delete(recursive: true);
     Directory(cachePath).createSync(recursive: true);
+    for (final p in [
+      '${App.cachePath}/webdav_cbz',
+      '${App.cachePath}/webdav_covers',
+    ]) {
+      final dir = Directory(p);
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    }
     _db.execute('''
       DELETE FROM cache
     ''');

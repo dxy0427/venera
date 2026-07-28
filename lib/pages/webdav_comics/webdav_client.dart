@@ -366,38 +366,6 @@ class WebDavComicClient {
     }
   }
 
-  /// Extract the first image from a CBZ file as cover.
-  Future<Uint8List?> _extractCbzCover(String cbzPath) async {
-    try {
-      // Build the WebDAV URL for the CBZ file
-      final config = getConfig();
-      if (config == null) return null;
-      final baseUrl = config[0].replaceAll(RegExp(r'/+$'), '');
-      final fullUrl = '$baseUrl${cbzPath.startsWith('/') ? cbzPath : '/$cbzPath'}';
-
-      final reader = StreamingZipReader(
-        webdavUrl: fullUrl,
-        user: config[1],
-        pass: config[2],
-      );
-
-      try {
-        final entries = await reader.listEntries();
-        // Find first image
-        for (final entry in entries) {
-          if (entry.isDirectory) continue;
-          final ext = _getExtension(entry.fileName).toLowerCase();
-          if (_imageExtensions.contains(ext)) {
-            return await reader.readEntry(entry.fileName);
-          }
-        }
-      } finally {
-        reader.dispose();
-      }
-    } catch (_) {}
-    return null;
-  }
-
   /// Read an image file from WebDAV as bytes.
   Future<Uint8List> readImage(String path) async {
     final client = getClient();
@@ -488,6 +456,15 @@ class WebDavComicClient {
     return files;
   }
 
+  static String buildEncodedUrl(String baseUrl, String remotePath) {
+    final base = baseUrl.replaceAll(RegExp(r'/+$'), '');
+    final path = remotePath.startsWith('/') ? remotePath : '/$remotePath';
+    final uri = Uri.parse('$base$path');
+    final segments =
+        uri.pathSegments.map((s) => Uri.encodeComponent(s)).toList();
+    return uri.replace(pathSegments: segments).toString();
+  }
+
   /// Download a file from WebDAV to a local path.
   /// [onProgress] receives bytes received and total bytes (-1 if unknown).
   Future<void> downloadFile(String remotePath, String localPath,
@@ -502,9 +479,7 @@ class WebDavComicClient {
       final config = getConfig();
       if (config == null) throw Exception('WebDAV not configured');
 
-      // Build the full URL
-      final baseUrl = config[0].replaceAll(RegExp(r'/+$'), '');
-      final fullUrl = '$baseUrl${remotePath.startsWith('/') ? remotePath : '/$remotePath'}';
+      final fullUrl = buildEncodedUrl(config[0], remotePath);
 
       final req = await dio.request<ResponseBody>(
         fullUrl,

@@ -63,6 +63,10 @@ class _AppSettingsState extends State<AppSettings> {
         ListTile(
           title: Text("Cache Size".tl),
           subtitle: Text(bytesToReadableString(CacheManager().currentSize)),
+          onTap: () async {
+            await CacheManager().refreshSize();
+            if (mounted) setState(() {});
+          },
         ).toSliver(),
         _CallbackSetting(
           title: "Clear Cache".tl,
