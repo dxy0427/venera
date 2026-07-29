@@ -68,6 +68,7 @@ class WebDavProvider with ChangeNotifier {
 
     try {
       _comics = await _client.listComics();
+      if (_comics != null) _rememberEntrySizes(_comics!);
       _loadCoversInBackground();
     } catch (e) {
       _error = e.toString();
@@ -121,6 +122,9 @@ class WebDavProvider with ChangeNotifier {
     if (chapters.isNotEmpty) return chapters;
     final cbzFiles = await _client.listCbzFiles(dirPath);
     if (cbzFiles.isNotEmpty) {
+      for (final f in cbzFiles) {
+        _rememberArchiveSize(f.path, f.size);
+      }
       return cbzFiles
           .map((f) => WebDavChapter(name: f.name, path: f.path, imageCount: 0))
           .toList();
@@ -130,9 +134,8 @@ class WebDavProvider with ChangeNotifier {
 
   /// Get images for a specific chapter.
   Future<List<String>> getChapterImages(String chapterPath) async {
-    if (chapterPath.endsWith('.cbz') ||
-        chapterPath.endsWith('.zip') ||
-        chapterPath.endsWith('.cbr')) {
+    final lowerPath = chapterPath.toLowerCase();
+    if (lowerPath.endsWith('.cbz') || lowerPath.endsWith('.zip')) {
       return await _streamCbz(chapterPath);
     }
     final images = await _client.listImages(chapterPath);
@@ -164,10 +167,12 @@ class WebDavProvider with ChangeNotifier {
     final base = config[0].replaceAll(RegExp(r'/+$'), '');
     final fullPath = remotePath.startsWith('/') ? remotePath : '/$remotePath';
     final webdavUrl = WebDavComicClient.buildEncodedUrl(base, fullPath);
+    final knownSize = _archiveSizes[remotePath];
     final reader = StreamingZipReader(
       webdavUrl: webdavUrl,
       user: config[1],
       pass: config[2],
+      knownFileSize: knownSize,
     );
 
     try {
@@ -211,6 +216,19 @@ class WebDavProvider with ChangeNotifier {
 
   /// Cache for streaming ZIP readers (in-memory; rebuilt on demand).
   final Map<String, _StreamInfo> _streamingReaders = {};
+
+  /// PROPFIND sizes for archive paths (used by StreamingZipReader).
+  final Map<String, int> _archiveSizes = {};
+
+  void _rememberArchiveSize(String path, int size) {
+    if (size > 0) _archiveSizes[path] = size;
+  }
+
+  void _rememberEntrySizes(Iterable<WebDavComicEntry> entries) {
+    for (final e in entries) {
+      if (!e.isDirectory) _rememberArchiveSize(e.path, e.size);
+    }
+  }
 
   /// Load a single image from a streaming CBZ entry.
   ///
@@ -296,7 +314,8 @@ class WebDavProvider with ChangeNotifier {
 
   /// Pre-download a chapter in the background.
   void preDownloadChapter(String chapterPath) {
-    if (chapterPath.endsWith('.cbz') || chapterPath.endsWith('.zip')) {
+    final lowerPath = chapterPath.toLowerCase();
+    if (lowerPath.endsWith('.cbz') || lowerPath.endsWith('.zip')) {
       if (isCbzCached(chapterPath)) return;
       if (_downloadingChapters.contains(chapterPath)) return;
       _downloadAndExtractCbz(chapterPath).catchError((e) {
@@ -409,6 +428,7 @@ class WebDavProvider with ChangeNotifier {
       }
 
       _directoryEntries = entries;
+      _rememberEntrySizes(entries);
     } catch (e) {
       _error = e.toString();
       _directoryEntries = null;
@@ -455,6 +475,7 @@ class WebDavProvider with ChangeNotifier {
       info.reader.dispose();
     }
     _streamingReaders.clear();
+    _archiveSizes.clear();
     _client = WebDavComicClient();
     await loadComics(forceRefresh: true);
   }

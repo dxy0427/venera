@@ -27,7 +27,8 @@ const _imageExtensions = {
 };
 
 /// Supported archive extensions for comic detection.
-const _archiveExtensions = {'.cbz', '.zip', '.cb7', '.7z'};
+/// The streaming reader below supports ZIP containers only.
+const _archiveExtensions = {'.cbz', '.zip'};
 
 /// WebDAV client wrapper for comic browsing.
 class WebDavComicClient {
@@ -195,7 +196,7 @@ class WebDavComicClient {
             ),
           );
         } else if (_archiveExtensions.contains(ext)) {
-          // Archive file - cbz/zip comic
+          // Archive file - CBZ/ZIP comic.
           entries.add(
             WebDavComicEntry(
               name: _cleanName(name),
