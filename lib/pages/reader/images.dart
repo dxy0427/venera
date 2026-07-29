@@ -123,7 +123,7 @@ class _ReaderImagesState extends State<_ReaderImages> {
       }
 
       final source = reader.type.comicSource;
-      if (source?.loadComicPages == null) {
+      if (source == null || source.loadComicPages == null) {
         setState(() {
           error = 'Comic source is no longer available';
           reader.isLoading = false;
