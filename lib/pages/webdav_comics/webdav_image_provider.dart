@@ -5,6 +5,7 @@ import 'package:venera/foundation/image_provider/base_image_provider.dart';
 import 'package:venera/utils/io.dart';
 
 import 'webdav_image_provider.dart' as image_provider;
+import 'webdav_accounts.dart';
 import 'webdav_provider.dart';
 
 /// Image provider that loads images from WebDAV server.
@@ -33,7 +34,7 @@ class WebDavImageProvider
   }
 
   @override
-  String get key => path;
+  String get key => '${WebDavAccounts.activeId() ?? 'default'}@$path';
 }
 
 /// Image provider specifically for WebDAV comic reader images.
@@ -51,7 +52,9 @@ class WebDavReaderImageProvider
   });
 
   @override
-  Future<WebDavReaderImageProvider> obtainKey(ImageConfiguration configuration) {
+  Future<WebDavReaderImageProvider> obtainKey(
+    ImageConfiguration configuration,
+  ) {
     return SynchronousFuture(this);
   }
 
@@ -67,5 +70,5 @@ class WebDavReaderImageProvider
   }
 
   @override
-  String get key => '$path@$page';
+  String get key => '${WebDavAccounts.activeId() ?? 'default'}@$path@$page';
 }

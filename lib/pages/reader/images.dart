@@ -122,10 +122,16 @@ class _ReaderImagesState extends State<_ReaderImages> {
         }
       }
 
-      var res = await reader.type.comicSource!.loadComicPages!(
-        reader.widget.cid,
-        cp,
-      );
+      final source = reader.type.comicSource;
+      if (source?.loadComicPages == null) {
+        setState(() {
+          error = 'Comic source is no longer available';
+          reader.isLoading = false;
+          inProgress = false;
+        });
+        return;
+      }
+      var res = await source.loadComicPages!(reader.widget.cid, cp);
       if (!mounted) return;
       if (res.error) {
         setState(() {
@@ -687,7 +693,8 @@ class _GalleryModeState extends State<_GalleryMode>
     if (imageKey == null) return null;
     if (imageKey.startsWith("file://")) {
       return await File(imageKey.substring(7)).readAsBytes();
-    } else if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+    } else if (imageKey.startsWith('webdav://') ||
+        imageKey.startsWith('stream://')) {
       return await WebDavProvider().loadImage(imageKey);
     } else {
       return (await CacheManager().findCache(
@@ -1281,7 +1288,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
     if (imageKey == null) return null;
     if (imageKey.startsWith("file://")) {
       return await File(imageKey.substring(7)).readAsBytes();
-    } else if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+    } else if (imageKey.startsWith('webdav://') ||
+        imageKey.startsWith('stream://')) {
       return await WebDavProvider().loadImage(imageKey);
     } else {
       return (await CacheManager().findCache(
@@ -1317,10 +1325,7 @@ ImageProvider _createImageProviderFromKey(
   if (imageKey.startsWith('webdav://') ||
       imageKey.startsWith('stream://') ||
       (reader.type == ComicType.webdav && imageKey.startsWith('file://'))) {
-    return WebDavReaderImageProvider(
-      imageKey,
-      page: page,
-    );
+    return WebDavReaderImageProvider(imageKey, page: page);
   }
   // Find the _ReaderImagesState ancestor to get the callback
   _ReaderImagesState? imagesState;

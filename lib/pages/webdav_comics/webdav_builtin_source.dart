@@ -57,7 +57,7 @@ class WebDavBuiltinSource {
             }
             try {
               final provider = WebDavProvider();
-              await provider.loadComics(forceRefresh: true);
+              await provider.loadComics(forceRefresh: false);
               final comics = provider.comics ?? [];
               final readable = comics
                   .where((e) => !(e.isDirectory && e.isCategory))
@@ -65,10 +65,12 @@ class WebDavBuiltinSource {
               // Resolve cover paths before building list items so explore
               // can load thumbnails (stream:// for cbz, webdav:// for dirs).
               await provider.ensureCoverPaths(readable);
-              final list = <Comic>[];
-              for (final e in readable) {
-                list.add(await _toComicAsync(e));
-              }
+              final list = await provider.runBatches(
+                readable.map(
+                  (e) =>
+                      () => _toComicAsync(e),
+                ),
+              );
               list.sort(
                 (a, b) =>
                     a.title.toLowerCase().compareTo(b.title.toLowerCase()),
@@ -99,13 +101,16 @@ class WebDavBuiltinSource {
               .toList();
           await provider.ensureCoverPaths(readable);
           final kw = keyword.trim().toLowerCase();
-          final list = <Comic>[];
-          for (final e in readable) {
-            final comic = await _toComicAsync(e);
-            if (kw.isEmpty || _matchSearch(comic, e, kw)) {
-              list.add(comic);
-            }
-          }
+          final loaded = await provider.runBatches(
+            readable.map(
+              (e) =>
+                  () async => (e, await _toComicAsync(e)),
+            ),
+          );
+          final list = loaded
+              .where((item) => kw.isEmpty || _matchSearch(item.$2, item.$1, kw))
+              .map((item) => item.$2)
+              .toList();
           list.sort(
             (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
           );

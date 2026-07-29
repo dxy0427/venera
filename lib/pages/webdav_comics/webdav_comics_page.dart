@@ -9,6 +9,7 @@ import 'webdav_image_provider.dart';
 import 'webdav_models.dart';
 import 'webdav_provider.dart';
 import 'webdav_settings_page.dart';
+import 'webdav_accounts.dart';
 
 /// Sort mode for WebDAV comics.
 enum WebDavSortMode {
@@ -46,6 +47,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
 
   /// Display titles from info.json (path -> title).
   final Map<String, String> _infoTitles = {};
+  String? _infoAccountId;
 
   /// Current browsing path (null = root).
   String? _currentPath;
@@ -55,6 +57,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
   @override
   void initState() {
     super.initState();
+    _infoAccountId = WebDavAccounts.activeId();
     WebDavProvider().addListener(_onUpdate);
     if (WebDavProvider().comics == null && !WebDavProvider().isLoading) {
       WebDavProvider().loadComics();
@@ -100,6 +103,11 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
   }
 
   void _onUpdate() {
+    final accountId = WebDavAccounts.activeId();
+    if (accountId != _infoAccountId) {
+      _infoAccountId = accountId;
+      _infoTitles.clear();
+    }
     if (mounted) setState(() {});
   }
 
@@ -243,23 +251,41 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
     );
   }
 
-  String _displayTitle(WebDavComicEntry c) => _infoTitles[c.path] ?? c.name;
+  String _titleKey(String path) => '${_infoAccountId ?? 'default'}@$path';
+
+  String _displayTitle(WebDavComicEntry c) =>
+      _infoTitles[_titleKey(c.path)] ?? c.name;
 
   Future<void> _loadInfoTitles(List<WebDavComicEntry> comics) async {
     var changed = false;
-    for (final c in comics) {
-      if (!c.isDirectory || c.isCategory) continue;
-      if (_infoTitles.containsKey(c.path)) continue;
-      try {
-        final info = await WebDavProvider().loadComicInfo(c.path);
-        final t = info?.title?.trim();
-        _infoTitles[c.path] = (t != null && t.isNotEmpty) ? t : c.name;
-        changed = true;
-      } catch (_) {
-        _infoTitles[c.path] = c.name;
-      }
+    final pending = comics.where(
+      (c) =>
+          c.isDirectory &&
+          !c.isCategory &&
+          !_infoTitles.containsKey(_titleKey(c.path)),
+    );
+    const batchSize = 6;
+    final list = pending.toList();
+    for (var i = 0; i < list.length; i += batchSize) {
+      final batch = list.skip(i).take(batchSize);
+      await Future.wait(
+        batch.map((c) async {
+          try {
+            final info = await WebDavProvider().loadComicInfo(c.path);
+            final t = info?.title?.trim();
+            _infoTitles[_titleKey(c.path)] = (t != null && t.isNotEmpty)
+                ? t
+                : c.name;
+            changed = true;
+          } catch (_) {
+            _infoTitles[_titleKey(c.path)] = c.name;
+          }
+        }),
+      );
     }
-    if (changed && mounted) setState(() {});
+    if (changed && mounted) {
+      setState(() {});
+    }
   }
 
   List<WebDavComicEntry> _sortComics(List<WebDavComicEntry> comics) {

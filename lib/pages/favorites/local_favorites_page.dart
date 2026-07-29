@@ -1125,7 +1125,7 @@ class _ReorderComicsPageState extends State<_ReorderComicsPage> {
           type == 'detailed'
               ? "${e.time} | ${comicSource?.name ?? "Unknown"}"
               : "${e.type.comicSource?.name ?? "Unknown"} | ${e.time}",
-          comicSource?.key ?? (e.type == ComicType.local ? "local" : "Unknown"),
+          e.type.sourceKey,
           null,
           null,
         ),

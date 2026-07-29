@@ -36,6 +36,7 @@ class WebDavComicClient {
   String? _lastUrl;
   String? _lastUser;
   String? _lastPass;
+  final Map<String, Future<List<dynamic>>> _directoryCache = {};
 
   /// Get or create a WebDAV client from settings.
   webdav.Client getClient() {
@@ -66,8 +67,20 @@ class WebDavComicClient {
     _lastUrl = url;
     _lastUser = user;
     _lastPass = pass;
+    _directoryCache.clear();
     return _client!;
   }
+
+  Future<List<dynamic>> _readDir(String path) {
+    return _directoryCache.putIfAbsent(
+      path,
+      () async => List<dynamic>.from(await getClient().readDir(path)),
+    );
+  }
+
+  void clearDirectoryCache() => _directoryCache.clear();
+
+  Future<List<dynamic>> readDirectory(String path) => _readDir(path);
 
   List<String>? getConfig() {
     final active = WebDavAccounts.active();
@@ -169,11 +182,26 @@ class WebDavComicClient {
 
   /// List comic entries in the configured remote path.
   Future<List<WebDavComicEntry>> listComics() async {
-    final client = getClient();
     final entries = <WebDavComicEntry>[];
 
     try {
-      final items = await client.readDir(remotePath);
+      final items = await _readDir(remotePath);
+      final directoryItems = items.where((item) => item.isDir == true).toList();
+      final comicDirectories = <String, bool>{};
+      const batchSize = 6;
+      for (var i = 0; i < directoryItems.length; i += batchSize) {
+        final batch = directoryItems.skip(i).take(batchSize);
+        await Future.wait(
+          batch.map((item) async {
+            final name = item.name ?? '';
+            if (name.isNotEmpty && name != '.') {
+              comicDirectories[name] = await isComicDirectory(
+                '$remotePath$name/',
+              );
+            }
+          }),
+        );
+      }
 
       for (final item in items) {
         final name = item.name ?? '';
@@ -184,7 +212,7 @@ class WebDavComicClient {
 
         if (isDir) {
           final dirPath = '$remotePath$name/';
-          final isComic = await _isComicDirectory(dirPath);
+          final isComic = comicDirectories[name] ?? false;
           entries.add(
             WebDavComicEntry(
               name: _cleanName(name),
@@ -221,7 +249,6 @@ class WebDavComicClient {
   /// List image files inside a comic directory.
   /// Excludes common cover files.
   Future<List<WebDavImageEntry>> listImages(String dirPath) async {
-    final client = getClient();
     final images = <WebDavImageEntry>[];
     final coverNames = {
       'cover.jpg',
@@ -239,7 +266,7 @@ class WebDavComicClient {
     };
 
     try {
-      final items = await client.readDir(dirPath);
+      final items = await _readDir(dirPath);
 
       for (final item in items) {
         final name = item.name ?? '';
@@ -269,11 +296,10 @@ class WebDavComicClient {
 
   /// List subdirectories (chapters) inside a comic directory.
   Future<List<WebDavChapter>> listChapters(String dirPath) async {
-    final client = getClient();
     final chapters = <WebDavChapter>[];
 
     try {
-      final items = await client.readDir(dirPath);
+      final items = await _readDir(dirPath);
 
       for (final item in items) {
         final name = item.name ?? '';
@@ -283,7 +309,7 @@ class WebDavComicClient {
           // Count images in subdirectory
           int imageCount = 0;
           try {
-            final subItems = await client.readDir('$dirPath$name/');
+            final subItems = await _readDir('$dirPath$name/');
             for (final sub in subItems) {
               final subName = sub.name ?? '';
               final ext = _getExtension(subName).toLowerCase();
@@ -336,8 +362,7 @@ class WebDavComicClient {
           '封面.jpeg',
           '封面.png',
         };
-        final client = getClient();
-        final items = await client.readDir(comic.path);
+        final items = await _readDir(comic.path);
         String? firstImage;
         String? firstArchive;
         for (final item in items) {
@@ -420,8 +445,7 @@ class WebDavComicClient {
   /// Check if a comic directory has subdirectories (chapters).
   Future<bool> hasChapters(String dirPath) async {
     try {
-      final client = getClient();
-      final items = await client.readDir(dirPath);
+      final items = await _readDir(dirPath);
       for (final item in items) {
         if (item.isDir == true && (item.name ?? '') != '.') {
           return true;
@@ -432,10 +456,9 @@ class WebDavComicClient {
   }
 
   /// Whether a directory looks like a comic (has images or archives).
-  Future<bool> _isComicDirectory(String path) async {
+  Future<bool> isComicDirectory(String path) async {
     try {
-      final client = getClient();
-      final items = await client.readDir(path);
+      final items = await _readDir(path);
       int imageCount = 0;
       int archiveCount = 0;
       for (final item in items) {
@@ -455,7 +478,6 @@ class WebDavComicClient {
   /// List CBZ/ZIP files in a directory (for chapter-based comics).
   /// Excludes common cover files.
   Future<List<WebDavImageEntry>> listCbzFiles(String dirPath) async {
-    final client = getClient();
     final files = <WebDavImageEntry>[];
     final coverNames = {
       'cover.jpg',
@@ -472,7 +494,7 @@ class WebDavComicClient {
     };
 
     try {
-      final items = await client.readDir(dirPath);
+      final items = await _readDir(dirPath);
       for (final item in items) {
         final name = item.name ?? '';
         if (name.isEmpty || name == '.') continue;

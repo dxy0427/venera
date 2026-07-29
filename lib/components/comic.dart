@@ -25,9 +25,7 @@ ImageProvider? _findImageProvider(Comic comic) {
       // No stored cover: stream first image for archives, else path as file.
       final id = comic.id;
       final lower = id.toLowerCase();
-      if (lower.endsWith('.cbz') ||
-          lower.endsWith('.zip') ||
-          lower.endsWith('.cbr')) {
+      if (lower.endsWith('.cbz') || lower.endsWith('.zip')) {
         image = WebDavImageProvider('stream://$id');
       } else {
         image = WebDavImageProvider(

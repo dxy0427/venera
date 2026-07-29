@@ -64,6 +64,7 @@ class WebDavProvider with ChangeNotifier {
     _isLoading = true;
     _error = null;
     _directoryEntries = null;
+    if (forceRefresh) _client.clearDirectoryCache();
     notifyListeners();
 
     try {
@@ -81,18 +82,37 @@ class WebDavProvider with ChangeNotifier {
   }
 
   Future<void> ensureCoverPaths(List<WebDavComicEntry> comics) async {
-    for (final comic in comics) {
-      if (comic.isDirectory && comic.isCategory) continue;
-      if (comic.coverPath != null && comic.coverPath!.isNotEmpty) continue;
-      try {
-        await _client.resolveCoverPath(comic);
-      } catch (e) {
-        Log.error(
-          "WebDavProvider",
-          "Failed to resolve cover for ${comic.name}: $e",
-        );
-      }
+    const batchSize = 6;
+    for (var i = 0; i < comics.length; i += batchSize) {
+      final batch = comics.skip(i).take(batchSize);
+      await Future.wait(
+        batch.map((comic) async {
+          if (comic.isDirectory && comic.isCategory) return;
+          if (comic.coverPath != null && comic.coverPath!.isNotEmpty) return;
+          try {
+            await _client.resolveCoverPath(comic);
+          } catch (e) {
+            Log.error(
+              "WebDavProvider",
+              "Failed to resolve cover for ${comic.name}: $e",
+            );
+          }
+        }),
+      );
     }
+  }
+
+  Future<List<T>> runBatches<T>(
+    Iterable<Future<T> Function()> tasks, {
+    int batchSize = 6,
+  }) async {
+    final list = tasks.toList();
+    final result = <T>[];
+    for (var i = 0; i < list.length; i += batchSize) {
+      final batch = list.skip(i).take(batchSize);
+      result.addAll(await Future.wait(batch.map((task) => task())));
+    }
+    return result;
   }
 
   void _loadCoversInBackground() async {
@@ -216,6 +236,9 @@ class WebDavProvider with ChangeNotifier {
 
   /// Cache for streaming ZIP readers (in-memory; rebuilt on demand).
   final Map<String, _StreamInfo> _streamingReaders = {};
+
+  /// Avoid refetching info.json while the current account is being browsed.
+  final Map<String, Future<ComicInfo?>> _comicInfoRequests = {};
 
   /// PROPFIND sizes for archive paths (used by StreamingZipReader).
   final Map<String, int> _archiveSizes = {};
@@ -390,9 +413,24 @@ class WebDavProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final client = _client.getClient();
-      final items = await client.readDir(path);
+      final items = await _client.readDirectory(path);
       final entries = <WebDavComicEntry>[];
+      final directoryItems = items.where((item) => item.isDir == true).toList();
+      final comicDirectories = <String, bool>{};
+      const batchSize = 6;
+      for (var i = 0; i < directoryItems.length; i += batchSize) {
+        final batch = directoryItems.skip(i).take(batchSize);
+        await Future.wait(
+          batch.map((item) async {
+            final name = item.name ?? '';
+            if (name.isNotEmpty && name != '.') {
+              comicDirectories[name] = await _client.isComicDirectory(
+                '$path$name/',
+              );
+            }
+          }),
+        );
+      }
 
       for (final item in items) {
         final name = item.name ?? '';
@@ -403,7 +441,7 @@ class WebDavProvider with ChangeNotifier {
 
         if (isDir) {
           // Check if this directory is a comic or a category
-          final isComic = await _isComicDirectory('$path$name/');
+          final isComic = comicDirectories[name] ?? false;
           entries.add(
             WebDavComicEntry(
               name: name,
@@ -439,34 +477,6 @@ class WebDavProvider with ChangeNotifier {
     }
   }
 
-  /// Check if a directory contains comics (images or archives) directly.
-  Future<bool> _isComicDirectory(String path) async {
-    try {
-      final client = _client.getClient();
-      final items = await client.readDir(path);
-      int imageCount = 0;
-      int archiveCount = 0;
-      int subDirCount = 0;
-
-      for (final item in items) {
-        final name = item.name ?? '';
-        if (name.isEmpty || name == '.') continue;
-        if (item.isDir == true) {
-          subDirCount++;
-        } else {
-          final ext = _client.getExtension(name).toLowerCase();
-          if (_client.isImage(ext)) imageCount++;
-          if (_client.isArchive(ext)) archiveCount++;
-        }
-      }
-
-      // It's a comic if it has images or archives
-      return imageCount > 0 || archiveCount > 0;
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<void> refresh() async {
     _comics = null;
     _directoryEntries = null;
@@ -476,6 +486,7 @@ class WebDavProvider with ChangeNotifier {
     }
     _streamingReaders.clear();
     _archiveSizes.clear();
+    _comicInfoRequests.clear();
     _client = WebDavComicClient();
     await loadComics(forceRefresh: true);
   }
@@ -483,7 +494,14 @@ class WebDavProvider with ChangeNotifier {
   /// Load info.json from a comic directory (with caching).
   Future<ComicInfo?> loadComicInfo(String comicPath) async {
     final cacheKey = _cacheKey('webdav_info_v2', comicPath);
+    final pending = _comicInfoRequests[cacheKey];
+    if (pending != null) return pending;
+    final request = _loadComicInfo(cacheKey, comicPath);
+    _comicInfoRequests[cacheKey] = request;
+    return request;
+  }
 
+  Future<ComicInfo?> _loadComicInfo(String cacheKey, String comicPath) async {
     // Check cache first
     final cached = await CacheManager().findCache(cacheKey);
     if (cached != null) {

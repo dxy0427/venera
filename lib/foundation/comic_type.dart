@@ -19,7 +19,8 @@ class ComicType {
     } else if (this == webdav) {
       return "webdav";
     } else {
-      return comicSource!.key;
+      // Keep old favorites/history usable after their source is deleted.
+      return comicSource?.key ?? "Unknown:$value";
     }
   }
 
@@ -40,8 +41,12 @@ class ComicType {
       return local;
     } else if (key == "webdav") {
       return webdav;
+    } else if (key.startsWith('Unknown:')) {
+      final value = int.tryParse(key.substring('Unknown:'.length));
+      if (value != null) return ComicType(value);
     } else {
       return ComicType(key.hashCode);
     }
+    return ComicType(key.hashCode);
   }
 }

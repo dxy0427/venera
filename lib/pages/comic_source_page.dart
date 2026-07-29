@@ -549,6 +549,8 @@ void _validatePages() {
   List explorePages = appdata.settings['explore_pages'];
   List categoryPages = appdata.settings['categories'];
   List networkFavorites = appdata.settings['favorites'];
+  final searchSources =
+      (appdata.settings['searchSources'] as List?)?.toList() ?? <dynamic>[];
 
   var totalExplorePages = ComicSource.all()
       .map((e) => e.explorePages.map((e) => e.title))
@@ -580,10 +582,16 @@ void _validatePages() {
       networkFavorites.remove(page);
     }
   }
+  for (var source in List.from(searchSources)) {
+    if (!ComicSource.all().any((e) => e.key == source)) {
+      searchSources.remove(source);
+    }
+  }
 
   appdata.settings['explore_pages'] = explorePages.toSet().toList();
   appdata.settings['categories'] = categoryPages.toSet().toList();
   appdata.settings['favorites'] = networkFavorites.toSet().toList();
+  appdata.settings['searchSources'] = searchSources.toSet().toList();
 
   appdata.saveData();
 }

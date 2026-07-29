@@ -9,6 +9,7 @@ import 'package:venera/utils/io.dart';
 import '../history.dart';
 import 'base_image_provider.dart';
 import 'history_image_provider.dart' as image_provider;
+import '../../pages/webdav_comics/webdav_accounts.dart';
 
 class HistoryImageProvider
     extends BaseImageProvider<image_provider.HistoryImageProvider> {
@@ -41,9 +42,7 @@ class HistoryImageProvider
               !cover.startsWith('http'))) {
         final id = cover.isNotEmpty ? cover : history.id;
         final lower = id.toLowerCase();
-        if (lower.endsWith('.cbz') ||
-            lower.endsWith('.zip') ||
-            lower.endsWith('.cbr')) {
+        if (lower.endsWith('.cbz') || lower.endsWith('.zip')) {
           cover = 'stream://$id';
         } else if (!id.startsWith('webdav://')) {
           cover = 'webdav://$id';
@@ -62,8 +61,10 @@ class HistoryImageProvider
       if (localComic != null) {
         return localComic.coverFile.readAsBytes();
       }
-      var comicSource =
-          history.type.comicSource ?? (throw "Comic source not found.");
+      var comicSource = history.type.comicSource;
+      if (comicSource == null || comicSource.loadComicInfo == null) {
+        throw "Comic source is no longer available.";
+      }
       var comic = await comicSource.loadComicInfo!(history.id);
       checkStop();
       url = comic.data.cover;
@@ -95,5 +96,10 @@ class HistoryImageProvider
   }
 
   @override
-  String get key => "history${history.id}${history.type.value}";
+  String get key {
+    final account = history.type == ComicType.webdav
+        ? '@${WebDavAccounts.activeId() ?? 'default'}'
+        : '';
+    return "history$account${history.id}${history.type.value}";
+  }
 }

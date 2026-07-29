@@ -5,6 +5,7 @@ import 'package:flutter_qjs/flutter_qjs.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
+import 'package:venera/pages/webdav_comics/webdav_accounts.dart';
 import 'package:venera/pages/webdav_comics/webdav_provider.dart';
 import 'package:venera/utils/image.dart';
 
@@ -16,7 +17,7 @@ abstract class ImageDownloader {
     String? sourceKey, [
     String? cid,
   ]) async* {
-    final cacheKey = "$url@$sourceKey${cid != null ? '@$cid' : ''}";
+    final cacheKey = _cacheKey(url, sourceKey, cid);
     final cache = await CacheManager().findCache(cacheKey);
 
     if (cache != null) {
@@ -129,7 +130,7 @@ abstract class ImageDownloader {
     String cid,
     String eid,
   ) {
-    final cacheKey = "$imageKey@$sourceKey@$cid@$eid";
+    final cacheKey = _cacheKey(imageKey, sourceKey, '$cid@$eid');
     if (_loadingImages.containsKey(cacheKey)) {
       return _loadingImages[cacheKey]!.stream;
     }
@@ -141,6 +142,13 @@ abstract class ImageDownloader {
     );
     _loadingImages[cacheKey] = stream;
     return stream.stream;
+  }
+
+  static String _cacheKey(String value, String? sourceKey, String? suffix) {
+    final account = sourceKey == 'webdav'
+        ? '@${WebDavAccounts.activeId() ?? 'default'}'
+        : '';
+    return '$value@$sourceKey$account${suffix == null ? '' : '@$suffix'}';
   }
 
   static Stream<ImageDownloadProgress> loadComicImageUnwrapped(
@@ -158,7 +166,7 @@ abstract class ImageDownloader {
     String cid,
     String eid,
   ) async* {
-    final cacheKey = "$imageKey@$sourceKey@$cid@$eid";
+    final cacheKey = _cacheKey(imageKey, sourceKey, '$cid@$eid');
     final cache = await CacheManager().findCache(cacheKey);
 
     if (cache != null) {
