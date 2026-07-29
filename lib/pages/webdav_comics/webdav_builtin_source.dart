@@ -228,7 +228,6 @@ class WebDavBuiltinSource {
     String title = e.name;
     String? author;
     final tags = <String>[];
-    double? stars;
     if (e.isDirectory) {
       final info = await WebDavProvider().loadComicInfo(e.path);
       if (info != null) {
@@ -238,7 +237,6 @@ class WebDavBuiltinSource {
         if (info.author != null && info.author!.trim().isNotEmpty) {
           author = info.author!.trim();
         }
-        stars = info.stars;
         // Flatten dynamic tags from info.json for list display/search
         for (final entry in info.tags.entries) {
           for (final v in entry.value) {

@@ -17,8 +17,7 @@
 /// - [WebDavImageProvider] - ImageProvider
 /// - [WebDavComicsPage] - directory browser
 /// - [WebDavSettingsPage] - server config
-
-library webdav_comics;
+library;
 
 export 'webdav_accounts.dart';
 export 'webdav_builtin_source.dart';

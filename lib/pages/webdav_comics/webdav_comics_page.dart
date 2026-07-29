@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
-import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/utils/translations.dart';
 
@@ -233,7 +232,9 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
                   return RadioListTile<WebDavSortMode>(
                     title: Text(mode.label.tl),
                     value: mode,
+                    // ignore: deprecated_member_use
                     groupValue: _sortMode,
+                    // ignore: deprecated_member_use
                     onChanged: (v) {
                       if (v != null) {
                         setDialogState(() => _sortMode = v);

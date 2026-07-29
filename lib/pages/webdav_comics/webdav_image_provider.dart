@@ -2,7 +2,6 @@ import 'dart:async' show Future;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:venera/foundation/image_provider/base_image_provider.dart';
-import 'package:venera/utils/io.dart';
 
 import 'webdav_image_provider.dart' as image_provider;
 import 'webdav_accounts.dart';

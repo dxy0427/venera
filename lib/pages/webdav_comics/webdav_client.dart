@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:webdav_client/webdav_client.dart' as webdav;
 import 'package:venera/foundation/appdata.dart';
@@ -11,7 +10,6 @@ import 'package:venera/utils/natural_sort.dart';
 
 import 'webdav_accounts.dart';
 import 'webdav_models.dart';
-import 'streaming_zip.dart';
 
 /// Supported image extensions for comic detection.
 const _imageExtensions = {
