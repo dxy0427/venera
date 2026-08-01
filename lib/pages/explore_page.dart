@@ -35,9 +35,17 @@ class _ExplorePageState extends State<ExplorePage>
         .toList();
     explorePages = explorePages.where((e) => all.contains(e)).toList();
     if (!pages.isEqualTo(explorePages)) {
+      final oldIndex = controller.index;
+      controller.dispose();
       setState(() {
         pages = explorePages;
-        controller = TabController(length: pages.length, vsync: this);
+        controller = TabController(
+          length: pages.length,
+          vsync: this,
+          initialIndex: pages.isEmpty
+              ? 0
+              : oldIndex.clamp(0, pages.length - 1),
+        );
       });
     }
   }

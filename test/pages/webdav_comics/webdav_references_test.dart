@@ -103,4 +103,20 @@ void main() {
 
     expect(titles.toSet(), hasLength(titles.length));
   });
+
+  test('explore page list can be refreshed in place', () {
+    final pages = WebDavBuiltinSource.explorePagesForAccounts([
+      WebDavAccount(
+        id: 'one',
+        name: 'NAS',
+        url: 'https://one',
+        user: '',
+        pass: '',
+      ),
+    ]);
+
+    pages.clear();
+
+    expect(pages, isEmpty);
+  });
 }

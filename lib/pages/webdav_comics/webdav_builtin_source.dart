@@ -47,25 +47,23 @@ class WebDavBuiltinSource {
   ) {
     final accounts = sourceAccounts.where((e) => e.isValid).toList();
     final titles = <String>{};
-    return accounts
-        .map((account) {
-          final baseTitle = _title(account, accounts);
-          var title = baseTitle;
-          var suffix = 2;
-          while (!titles.add(title)) {
-            title = '$baseTitle · $suffix';
-            suffix++;
-          }
-          return ExplorePageData(
-            title,
-            ExplorePageType.multiPageComicList,
-            (page) => _loadExplorePage(account.id, page),
-            null,
-            null,
-            null,
-          );
-        })
-        .toList(growable: false);
+    return accounts.map((account) {
+      final baseTitle = _title(account, accounts);
+      var title = baseTitle;
+      var suffix = 2;
+      while (!titles.add(title)) {
+        title = '$baseTitle · $suffix';
+        suffix++;
+      }
+      return ExplorePageData(
+        title,
+        ExplorePageType.multiPageComicList,
+        (page) => _loadExplorePage(account.id, page),
+        null,
+        null,
+        null,
+      );
+    }).toList();
   }
 
   static Future<Res<List<Comic>>> _loadExplorePage(
