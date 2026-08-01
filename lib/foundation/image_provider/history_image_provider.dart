@@ -31,7 +31,9 @@ class HistoryImageProvider
       }
     }
     // WebDAV covers (remote path / stream / webdav://)
-    if (history.type == ComicType.webdav) {
+    if (history.type == ComicType.webdav &&
+        !url.startsWith('http://') &&
+        !url.startsWith('https://')) {
       checkStop();
       final comicRef = WebDavResourceRef.parse(history.id);
       var cover = url.isNotEmpty && WebDavResourceRef.isReference(url)

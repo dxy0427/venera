@@ -29,10 +29,12 @@ abstract class ImageDownloader {
       return;
     }
 
-    if (sourceKey == 'webdav' ||
-        url.startsWith('webdav://') ||
-        url.startsWith('stream://') ||
-        url.startsWith('file://')) {
+    if ((sourceKey == 'webdav' ||
+            url.startsWith('webdav://') ||
+            url.startsWith('stream://') ||
+            url.startsWith('file://')) &&
+        !url.startsWith('http://') &&
+        !url.startsWith('https://')) {
       final bytes = await _loadWebDavImageBytes(url);
       await CacheManager().writeCache(cacheKey, bytes);
       yield ImageDownloadProgress(
@@ -176,10 +178,12 @@ abstract class ImageDownloader {
     }
 
     // WebDAV / streaming / extracted local images
-    if (sourceKey == 'webdav' ||
-        imageKey.startsWith('webdav://') ||
-        imageKey.startsWith('stream://') ||
-        imageKey.startsWith('file://')) {
+    if ((sourceKey == 'webdav' ||
+            imageKey.startsWith('webdav://') ||
+            imageKey.startsWith('stream://') ||
+            imageKey.startsWith('file://')) &&
+        !imageKey.startsWith('http://') &&
+        !imageKey.startsWith('https://')) {
       try {
         // Lazy import path via ComicSource image config is not used;
         // load through WebDav provider when available.
