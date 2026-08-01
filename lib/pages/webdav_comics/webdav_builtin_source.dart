@@ -229,7 +229,7 @@ class WebDavBuiltinSource {
       ..addAll(pages);
     final validTitles = pages.map((e) => e.title).toSet();
     final current = List<String>.from(appdata.settings['explore_pages'] ?? []);
-    appdata.settings['explore_pages'] = [
+    final updatedExplorePages = [
       ...current.where(
         (title) =>
             title != exploreTitle &&
@@ -238,6 +238,10 @@ class WebDavBuiltinSource {
       ),
       ...pages.map((e) => e.title).where((title) => !current.contains(title)),
     ];
+    if (!current.toSet().containsAll(updatedExplorePages) ||
+        !updatedExplorePages.toSet().containsAll(current)) {
+      appdata.settings['explore_pages'] = updatedExplorePages;
+    }
     appdata.saveData(false);
     ComicSourceManager().notifyStateChange();
   }
