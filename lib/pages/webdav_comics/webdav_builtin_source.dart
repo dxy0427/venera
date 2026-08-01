@@ -5,9 +5,10 @@ import 'package:venera/foundation/res.dart';
 import 'package:venera/utils/translations.dart';
 
 import 'comic_info.dart';
-import 'webdav_client.dart';
+import 'webdav_accounts.dart';
 import 'webdav_models.dart';
 import 'webdav_provider.dart';
+import 'webdav_references.dart';
 import 'webdav_settings_page.dart';
 
 /// Built-in WebDAV comic source (native Dart, not a JS config).
@@ -24,6 +25,75 @@ class WebDavBuiltinSource {
 
   static const exploreTitle = 'WebDAV Comics';
 
+  static ComicSource? get _registered => ComicSource.find(key);
+
+  static String _title(WebDavAccount account, Iterable<WebDavAccount> all) {
+    final sameName = all.where((e) => e.name == account.name).toList();
+    if (sameName.length == 1) return 'WebDAV · ${account.name}';
+    final shortId = account.id.length <= 6
+        ? account.id
+        : account.id.substring(account.id.length - 6);
+    return 'WebDAV · ${account.name} · $shortId';
+  }
+
+  static List<ExplorePageData> _buildExplorePages() {
+    return explorePagesForAccounts(WebDavAccounts.list());
+  }
+
+  static List<ExplorePageData> explorePagesForAccounts(
+    Iterable<WebDavAccount> sourceAccounts,
+  ) {
+    final accounts = sourceAccounts.where((e) => e.isValid).toList();
+    final titles = <String>{};
+    return accounts
+        .map((account) {
+          final baseTitle = _title(account, accounts);
+          var title = baseTitle;
+          var suffix = 2;
+          while (!titles.add(title)) {
+            title = '$baseTitle · $suffix';
+            suffix++;
+          }
+          return ExplorePageData(
+            title,
+            ExplorePageType.multiPageComicList,
+            (page) => _loadExplorePage(account.id, page),
+            null,
+            null,
+            null,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  static Future<Res<List<Comic>>> _loadExplorePage(
+    String accountId,
+    int page,
+  ) async {
+    if (page > 1) return const Res([], subData: 1);
+    try {
+      final provider = WebDavProvider.forAccount(accountId);
+      await provider.loadComics(forceRefresh: false);
+      final comics = provider.comics ?? [];
+      final readable = comics
+          .where((e) => !(e.isDirectory && e.isCategory))
+          .toList();
+      await provider.ensureCoverPaths(readable);
+      final list = await provider.runBatches(
+        readable.map(
+          (entry) =>
+              () => _toComicAsync(provider, accountId, entry),
+        ),
+      );
+      list.sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+      );
+      return Res(list, subData: 1);
+    } catch (e) {
+      return Res.error(e.toString());
+    }
+  }
+
   static ComicSource create() {
     final settings = <String, Map<String, dynamic>>{
       'accounts': {
@@ -35,82 +105,47 @@ class WebDavBuiltinSource {
         },
       },
     };
-    return ComicSource(
+    final source = ComicSource(
       name,
       key,
       null, // account
       null, // categoryData
       null, // categoryComicsData
       null, // favoriteData
-      [
-        ExplorePageData(
-          exploreTitle,
-          ExplorePageType.multiPageComicList,
-          (page) async {
-            if (page > 1) {
-              return const Res([], subData: 1);
-            }
-            if (!WebDavProvider().isConfigured) {
-              return Res.error(
-                'WebDAV not configured. Open settings to set server URL.'.tl,
-              );
-            }
-            try {
-              final provider = WebDavProvider();
-              await provider.loadComics(forceRefresh: false);
-              final comics = provider.comics ?? [];
-              final readable = comics
-                  .where((e) => !(e.isDirectory && e.isCategory))
-                  .toList();
-              // Resolve cover paths before building list items so explore
-              // can load thumbnails (stream:// for cbz, webdav:// for dirs).
-              await provider.ensureCoverPaths(readable);
-              final list = await provider.runBatches(
-                readable.map(
-                  (e) =>
-                      () => _toComicAsync(e),
-                ),
-              );
-              list.sort(
-                (a, b) =>
-                    a.title.toLowerCase().compareTo(b.title.toLowerCase()),
-              );
-              return Res(list, subData: 1);
-            } catch (e) {
-              return Res.error(e.toString());
-            }
-          },
-          null,
-          null,
-          null,
-        ),
-      ],
+      _buildExplorePages(),
       SearchPageData(null, (keyword, page, options) async {
         if (page > 1) {
           return const Res([], subData: 1);
         }
-        if (!WebDavProvider().isConfigured) {
+        final accounts = WebDavAccounts.list().where((e) => e.isValid).toList();
+        if (accounts.isEmpty) {
           return Res.error('WebDAV not configured'.tl);
         }
         try {
-          final provider = WebDavProvider();
-          await provider.loadComics(forceRefresh: false);
-          final all = provider.comics ?? [];
-          final readable = all
-              .where((e) => !(e.isDirectory && e.isCategory))
-              .toList();
-          await provider.ensureCoverPaths(readable);
           final kw = keyword.trim().toLowerCase();
-          final loaded = await provider.runBatches(
-            readable.map(
-              (e) =>
-                  () async => (e, await _toComicAsync(e)),
-            ),
-          );
-          final list = loaded
-              .where((item) => kw.isEmpty || _matchSearch(item.$2, item.$1, kw))
-              .map((item) => item.$2)
-              .toList();
+          final list = <Comic>[];
+          for (final account in accounts) {
+            final provider = WebDavProvider.forAccount(account.id);
+            await provider.loadComics(forceRefresh: false);
+            final readable = (provider.comics ?? [])
+                .where((e) => !(e.isDirectory && e.isCategory))
+                .toList();
+            await provider.ensureCoverPaths(readable);
+            final loaded = await provider.runBatches(
+              readable.map(
+                (e) =>
+                    () async =>
+                        (e, await _toComicAsync(provider, account.id, e)),
+              ),
+            );
+            list.addAll(
+              loaded
+                  .where(
+                    (item) => kw.isEmpty || _matchSearch(item.$2, item.$1, kw),
+                  )
+                  .map((item) => item.$2),
+            );
+          }
           list.sort(
             (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
           );
@@ -179,6 +214,30 @@ class WebDavBuiltinSource {
       null,
       null,
     );
+    source.data['accounts'] = WebDavAccounts.list().toString();
+    return source;
+  }
+
+  static void syncRegisteredSource() {
+    final source = _registered;
+    if (source == null) return;
+    final pages = _buildExplorePages();
+    source.explorePages
+      ..clear()
+      ..addAll(pages);
+    final validTitles = pages.map((e) => e.title).toSet();
+    final current = List<String>.from(appdata.settings['explore_pages'] ?? []);
+    appdata.settings['explore_pages'] = [
+      ...current.where(
+        (title) =>
+            title != exploreTitle &&
+            title != 'WebDAV' &&
+            (!title.startsWith('WebDAV · ') || validTitles.contains(title)),
+      ),
+      ...pages.map((e) => e.title).where((title) => !current.contains(title)),
+    ];
+    appdata.saveData(false);
+    ComicSourceManager().notifyStateChange();
   }
 
   static bool _matchSearch(Comic comic, WebDavComicEntry entry, String kw) {
@@ -194,42 +253,66 @@ class WebDavBuiltinSource {
 
   /// Normalize cover paths for history/favorites/explore.
   /// Keeps stream://, webdav://, file://, http(s) intact; never double-prefix.
-  static String _normalizeCover(String cover, [String? basePath]) {
+  static String _normalizeCover(
+    String cover,
+    String accountId, [
+    String? basePath,
+  ]) {
     var c = cover.trim();
     if (c.isEmpty) return '';
-    // Repair legacy double-prefixed stream covers.
-    if (c.startsWith('webdav://stream://')) {
-      c = c.substring(8); // -> stream://...
+    if (WebDavResourceRef.isReference(c)) return c;
+    if (c.startsWith('stream://')) {
+      return WebDavResourceRef.stream(accountId, c.substring(9)).encode();
+    }
+    if (c.startsWith('webdav://')) {
+      c = c.substring(9);
     }
     if (c.startsWith('webdav://') ||
         c.startsWith('stream://') ||
         c.startsWith('file://') ||
         c.startsWith('http://') ||
         c.startsWith('https://')) {
+      if (c.startsWith('webdav://') || c.startsWith('stream://')) {
+        return c;
+      }
       return c;
     }
     if (basePath != null && basePath.isNotEmpty && !c.startsWith('/')) {
       final base = basePath.endsWith('/') ? basePath : '$basePath/';
-      return 'webdav://$base$c';
+      return WebDavResourceRef.image(accountId, '$base$c').encode();
     }
-    return 'webdav://$c';
+    return WebDavResourceRef.image(accountId, c).encode();
   }
 
-  static String _coverOf(WebDavComicEntry e) {
+  static String _coverOf(WebDavComicEntry e, String accountId) {
     if (e.coverPath == null || e.coverPath!.isEmpty) {
       // Archive fallback: stream first image as cover.
-      if (!e.isDirectory) return 'stream://${e.path}';
+      if (!e.isDirectory) {
+        return WebDavResourceRef.stream(accountId, e.path).encode();
+      }
       return '';
     }
-    return _normalizeCover(e.coverPath!, e.path);
+    if (e.coverPath!.startsWith('stream://')) {
+      return WebDavResourceRef.stream(
+        accountId,
+        e.coverPath!.substring(9),
+      ).encode();
+    }
+    return _normalizeCover(e.coverPath!, accountId, e.path);
   }
 
-  static Future<Comic> _toComicAsync(WebDavComicEntry e) async {
+  static Future<Comic> _toComicAsync(
+    WebDavProvider provider,
+    String accountId,
+    WebDavComicEntry e,
+  ) async {
     String title = e.name;
     String? author;
     final tags = <String>[];
     if (e.isDirectory) {
-      final info = await WebDavProvider().loadComicInfo(e.path);
+      final info = await provider.loadComicInfo(
+        WebDavResourceRef.comic(accountId, e.path).encode(),
+      );
       if (info != null) {
         if (info.title != null && info.title!.trim().isNotEmpty) {
           title = info.title!.trim();
@@ -248,8 +331,8 @@ class WebDavBuiltinSource {
     final desc = e.isDirectory ? 'Folder'.tl : 'Archive'.tl;
     return Comic(
       title,
-      _coverOf(e),
-      e.path,
+      _coverOf(e, accountId),
+      WebDavResourceRef.comic(accountId, e.path).encode(),
       author,
       tags,
       desc,
@@ -262,22 +345,23 @@ class WebDavBuiltinSource {
   /// Load comic details for standard ComicPage UI.
   static Future<Res<ComicDetails>> loadComicInfo(String id) async {
     try {
-      final provider = WebDavProvider();
+      final ref = WebDavResourceRef.parse(id);
+      final provider = WebDavProvider.forAccount(ref.accountId);
       if (!provider.isConfigured) {
         return Res.error('WebDAV not configured'.tl);
       }
 
-      final path = id;
+      final path = ref.remotePath;
       final name = path.split('/').where((s) => s.isNotEmpty).last;
       final isDirectory = path.endsWith('/');
 
       final ComicInfo? info = isDirectory
-          ? await provider.loadComicInfo(path)
+          ? await provider.loadComicInfo(id)
           : null;
 
       String cover = '';
       if (info?.cover != null && info!.cover!.isNotEmpty) {
-        cover = _normalizeCover(info.cover!, path);
+        cover = _normalizeCover(info.cover!, ref.accountId, path);
       } else {
         final entry = WebDavComicEntry(
           name: name,
@@ -285,15 +369,15 @@ class WebDavBuiltinSource {
           isDirectory: isDirectory,
         );
         try {
-          await WebDavComicClient().loadCover(entry);
+          await provider.loadCover(entry);
           if (entry.coverPath != null) {
-            cover = _normalizeCover(entry.coverPath!, path);
+            cover = _coverOf(entry, ref.accountId);
           }
         } catch (_) {}
       }
       // Archive without resolved cover: stream first image.
       if (cover.isEmpty && !isDirectory) {
-        cover = 'stream://$path';
+        cover = WebDavResourceRef.stream(ref.accountId, path).encode();
       }
 
       ComicChapters? chapters;
@@ -303,15 +387,16 @@ class WebDavBuiltinSource {
         if (chapterList.isNotEmpty) {
           final map = <String, String>{};
           for (final c in chapterList) {
-            map[c.path] = c.name;
+            map[WebDavResourceRef.chapter(ref.accountId, c.path).encode()] =
+                c.name;
           }
           chapters = ComicChapters(map);
         } else {
-          final images = await provider.getComicImages(path);
+          final images = await provider.getComicImages(id);
           maxPage = images.length;
         }
       } else {
-        final images = await provider.getComicImages(path);
+        final images = await provider.getComicImages(id);
         maxPage = images.length;
       }
 
@@ -354,7 +439,7 @@ class WebDavBuiltinSource {
         'tags': tags,
         'chapters': chapters?.toJson(),
         'sourceKey': key,
-        'comicId': path,
+        'comicId': id,
         'stars': info?.stars,
         'maxPage': maxPage,
         'updateTime': null,
@@ -368,9 +453,17 @@ class WebDavBuiltinSource {
 
   static Future<Res<List<String>>> loadComicPages(String id, String? ep) async {
     try {
-      final provider = WebDavProvider();
+      final comicRef = WebDavResourceRef.parse(id);
+      final provider = WebDavProvider.forAccount(comicRef.accountId);
       List<String> images;
       if (ep != null && ep.isNotEmpty && ep != '0') {
+        final chapterRef = WebDavResourceRef.parse(ep);
+        if (chapterRef.accountId != comicRef.accountId) {
+          throw WebDavAccountMismatchException(
+            comicRef.accountId,
+            chapterRef.accountId,
+          );
+        }
         images = await provider.getChapterImages(ep);
       } else {
         images = await provider.getComicImages(id);
@@ -384,24 +477,20 @@ class WebDavBuiltinSource {
   /// Register into [ComicSourceManager] if not already present.
   static void register() {
     final manager = ComicSourceManager();
-    if (manager.find(key) != null) return;
+    if (manager.find(key) != null) {
+      syncRegisteredSource();
+      return;
+    }
     final source = create();
     final explorePages = List<String>.from(
       appdata.settings['explore_pages'] ?? [],
     );
-    // Migrate old explore tab id
-    if (explorePages.contains('WebDAV') &&
-        !explorePages.contains(exploreTitle)) {
-      final i = explorePages.indexOf('WebDAV');
-      explorePages[i] = exploreTitle;
-      appdata.settings['explore_pages'] = explorePages;
-      appdata.saveData(false);
-    } else if (!explorePages.contains(exploreTitle) &&
-        !explorePages.contains('WebDAV')) {
-      explorePages.add(exploreTitle);
-      appdata.settings['explore_pages'] = explorePages;
-      appdata.saveData(false);
-    }
+    final titles = source.explorePages.map((e) => e.title).toSet();
+    appdata.settings['explore_pages'] = [
+      ...explorePages.where((title) => titles.contains(title)),
+      ...titles.where((title) => !explorePages.contains(title)),
+    ];
+    appdata.saveData(false);
     manager.add(source);
   }
 }

@@ -5,11 +5,11 @@ import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/images.dart';
 import 'package:venera/pages/webdav_comics/webdav_provider.dart';
+import 'package:venera/pages/webdav_comics/webdav_references.dart';
 import 'package:venera/utils/io.dart';
 import '../history.dart';
 import 'base_image_provider.dart';
 import 'history_image_provider.dart' as image_provider;
-import '../../pages/webdav_comics/webdav_accounts.dart';
 
 class HistoryImageProvider
     extends BaseImageProvider<image_provider.HistoryImageProvider> {
@@ -33,28 +33,14 @@ class HistoryImageProvider
     // WebDAV covers (remote path / stream / webdav://)
     if (history.type == ComicType.webdav) {
       checkStop();
-      var cover = url.isNotEmpty ? url : history.id;
-      // Empty/legacy cover: CBZ/ZIP must stream first image, not fetch archive bytes.
-      if (cover.isEmpty ||
-          (!cover.startsWith('stream://') &&
-              !cover.startsWith('webdav://') &&
-              !cover.startsWith('file://') &&
-              !cover.startsWith('http'))) {
-        final id = cover.isNotEmpty ? cover : history.id;
-        final lower = id.toLowerCase();
-        if (lower.endsWith('.cbz') || lower.endsWith('.zip')) {
-          cover = 'stream://$id';
-        } else if (!id.startsWith('webdav://')) {
-          cover = 'webdav://$id';
-        } else {
-          cover = id;
-        }
-      }
-      // Repair double-prefixed stream covers from older builds.
-      if (cover.startsWith('webdav://stream://')) {
-        cover = cover.substring(8);
-      }
-      return WebDavProvider().loadImage(cover);
+      final comicRef = WebDavResourceRef.parse(history.id);
+      var cover = url.isNotEmpty && WebDavResourceRef.isReference(url)
+          ? url
+          : WebDavResourceRef.stream(
+              comicRef.accountId,
+              comicRef.remotePath,
+            ).encode();
+      return WebDavProvider.forAccount(comicRef.accountId).loadImage(cover);
     }
     if (!url.contains('/')) {
       var localComic = LocalManager().find(history.id, history.type);
@@ -97,9 +83,6 @@ class HistoryImageProvider
 
   @override
   String get key {
-    final account = history.type == ComicType.webdav
-        ? '@${WebDavAccounts.activeId() ?? 'default'}'
-        : '';
-    return "history$account${history.id}${history.type.value}";
+    return "history${history.id}${history.type.value}";
   }
 }

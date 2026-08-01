@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter_qjs/flutter_qjs.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
-import 'package:venera/pages/webdav_comics/webdav_accounts.dart';
 import 'package:venera/pages/webdav_comics/webdav_provider.dart';
+import 'package:venera/pages/webdav_comics/webdav_references.dart';
+import 'package:venera/utils/io.dart';
 import 'package:venera/utils/image.dart';
 
 import 'app_dio.dart';
@@ -145,10 +144,7 @@ abstract class ImageDownloader {
   }
 
   static String _cacheKey(String value, String? sourceKey, String? suffix) {
-    final account = sourceKey == 'webdav'
-        ? '@${WebDavAccounts.activeId() ?? 'default'}'
-        : '';
-    return '$value@$sourceKey$account${suffix == null ? '' : '@$suffix'}';
+    return '$value@$sourceKey${suffix == null ? '' : '@$suffix'}';
   }
 
   static Stream<ImageDownloadProgress> loadComicImageUnwrapped(
@@ -380,7 +376,11 @@ class _StreamWrapper<T> {
 }
 
 Future<Uint8List> _loadWebDavImageBytes(String imageKey) async {
-  return WebDavProvider().loadImage(imageKey);
+  if (imageKey.startsWith('file://')) {
+    return File(imageKey.substring(7)).readAsBytes();
+  }
+  final ref = WebDavResourceRef.parse(imageKey);
+  return WebDavProvider.forAccount(ref.accountId).loadImage(imageKey);
 }
 
 class ImageDownloadProgress {

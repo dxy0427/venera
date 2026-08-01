@@ -12,18 +12,52 @@ import 'package:venera/utils/natural_sort.dart';
 import 'webdav_accounts.dart';
 import 'webdav_client.dart';
 import 'webdav_models.dart';
+import 'webdav_references.dart';
 import 'streaming_zip.dart';
 import 'comic_info.dart';
 
 /// Manages WebDAV comic state - connection, caching, and data.
 class WebDavProvider with ChangeNotifier {
-  static WebDavProvider? _instance;
+  static final Map<String, WebDavProvider> _instances = {};
 
-  WebDavProvider._();
+  final String accountId;
+  late WebDavComicClient _client;
 
-  factory WebDavProvider() => _instance ??= WebDavProvider._();
+  WebDavProvider._(this.accountId) {
+    final account = WebDavAccounts.find(accountId);
+    if (account == null) {
+      throw WebDavAccountMissingException(accountId);
+    }
+    _client = WebDavComicClient(account);
+  }
 
-  WebDavComicClient _client = WebDavComicClient();
+  factory WebDavProvider.forAccount(String accountId) {
+    final account = WebDavAccounts.find(accountId);
+    if (account == null) throw WebDavAccountMissingException(accountId);
+    return _instances.putIfAbsent(accountId, () => WebDavProvider._(accountId));
+  }
+
+  static void release(String accountId) {
+    _instances.remove(accountId)?.disposeProvider();
+  }
+
+  static void releaseMissingAccounts() {
+    final ids = _instances.keys
+        .where((id) => WebDavAccounts.find(id) == null)
+        .toList();
+    for (final id in ids) {
+      release(id);
+    }
+  }
+
+  void disposeProvider() {
+    for (final info in _streamingReaders.values) {
+      info.reader.dispose();
+    }
+    _streamingReaders.clear();
+    dispose();
+  }
+
   List<WebDavComicEntry>? _comics;
   bool _isLoading = false;
   String? _error;
@@ -33,9 +67,12 @@ class WebDavProvider with ChangeNotifier {
   String? get error => _error;
   bool get isConfigured => _client.isConfigured;
 
-  String get _accountScope {
-    final id = WebDavAccounts.activeId();
-    return (id == null || id.isEmpty) ? 'default' : id;
+  String get _accountScope => accountId;
+
+  void _requireAccount() {
+    if (WebDavAccounts.find(accountId) == null) {
+      throw WebDavAccountMissingException(accountId);
+    }
   }
 
   String _cacheKey(String prefix, String path) =>
@@ -51,6 +88,7 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load comics list from WebDAV server.
   Future<void> loadComics({bool forceRefresh = false}) async {
+    _requireAccount();
     if (_isLoading) return;
     if (!isConfigured) {
       _error = 'WebDAV not configured';
@@ -101,6 +139,10 @@ class WebDavProvider with ChangeNotifier {
     }
   }
 
+  Future<Uint8List?> loadCover(WebDavComicEntry comic) {
+    return _client.loadCover(comic);
+  }
+
   Future<List<T>> runBatches<T>(
     Iterable<Future<T> Function()> tasks, {
     int batchSize = 6,
@@ -122,12 +164,20 @@ class WebDavProvider with ChangeNotifier {
 
   /// Get image paths for a comic.
   Future<List<String>> getComicImages(String comicId) async {
-    final path = comicId;
+    _requireAccount();
+    final ref = WebDavResourceRef.parse(comicId);
+    _checkAccount(ref);
+    if (ref.kind != WebDavResourceKind.comic) {
+      throw const FormatException('Expected a WebDAV comic reference');
+    }
+    final path = ref.remotePath;
     if (path.endsWith('/')) {
       final hasChapters = await _client.hasChapters(path);
       if (hasChapters) return [];
       final images = await _client.listImages(path);
-      return images.map((e) => 'webdav://${e.path}').toList();
+      return images
+          .map((e) => WebDavResourceRef.image(accountId, e.path).encode())
+          .toList();
     } else {
       // Stream CBZ via Range. Do not silently fall back to full download
       // for huge archives — that blocks reading until the whole file is saved.
@@ -137,6 +187,7 @@ class WebDavProvider with ChangeNotifier {
 
   /// Get chapters for a comic.
   Future<List<WebDavChapter>> getChapters(String dirPath) async {
+    _requireAccount();
     final chapters = await _client.listChapters(dirPath);
     if (chapters.isNotEmpty) return chapters;
     final cbzFiles = await _client.listCbzFiles(dirPath);
@@ -153,12 +204,27 @@ class WebDavProvider with ChangeNotifier {
 
   /// Get images for a specific chapter.
   Future<List<String>> getChapterImages(String chapterPath) async {
+    _requireAccount();
+    final ref = WebDavResourceRef.parse(chapterPath);
+    _checkAccount(ref);
+    if (ref.kind != WebDavResourceKind.chapter) {
+      throw const FormatException('Expected a WebDAV chapter reference');
+    }
+    chapterPath = ref.remotePath;
     final lowerPath = chapterPath.toLowerCase();
     if (lowerPath.endsWith('.cbz') || lowerPath.endsWith('.zip')) {
       return await _streamCbz(chapterPath);
     }
     final images = await _client.listImages(chapterPath);
-    return images.map((e) => 'webdav://${e.path}').toList();
+    return images
+        .map((e) => WebDavResourceRef.image(accountId, e.path).encode())
+        .toList();
+  }
+
+  void _checkAccount(WebDavResourceRef ref) {
+    if (ref.accountId != accountId) {
+      throw WebDavAccountMismatchException(accountId, ref.accountId);
+    }
   }
 
   /// Get the cache directory for a CBZ file (offline extract fallback only).
@@ -229,7 +295,13 @@ class WebDavProvider with ChangeNotifier {
   Future<List<String>> _streamCbz(String remotePath) async {
     final info = await _ensureStreamReader(remotePath);
     return info.entries
-        .map((e) => 'stream://$remotePath::${e.fileName}')
+        .map(
+          (e) => WebDavResourceRef.stream(
+            accountId,
+            remotePath,
+            e.fileName,
+          ).encode(),
+        )
         .toList();
   }
 
@@ -258,22 +330,18 @@ class WebDavProvider with ChangeNotifier {
   /// - `stream://remotePath::entryFileName`
   /// - `stream://remotePath` (first image, used as cover)
   Future<Uint8List> loadStreamImage(String streamPath) async {
-    final withoutProtocol = streamPath.substring(9); // remove 'stream://'
-    String remotePath;
-    String? entryName;
-    final sep = withoutProtocol.indexOf('::');
-    if (sep < 0) {
-      remotePath = withoutProtocol;
-      entryName = null;
-    } else {
-      remotePath = withoutProtocol.substring(0, sep);
-      entryName = withoutProtocol.substring(sep + 2);
+    _requireAccount();
+    final ref = WebDavResourceRef.parse(streamPath);
+    if (ref.accountId != accountId || !ref.isStream) {
+      throw WebDavAccountMismatchException(accountId, ref.accountId);
     }
+    final remotePath = ref.remotePath;
+    var entryName = ref.entryName;
 
     final info = await _ensureStreamReader(remotePath);
     entryName ??= info.entries.first.fileName;
 
-    final cacheKey = _cacheKey('webdav_stream', '$remotePath/$entryName');
+    final cacheKey = _cacheKey('webdav_stream', '${ref.encode()}/$entryName');
     final cached = await CacheManager().findCache(cacheKey);
     if (cached != null) return cached.readAsBytes();
 
@@ -379,15 +447,25 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load an image from WebDAV or streaming CBZ with caching.
   Future<Uint8List> loadImage(String path) async {
-    // Repair legacy double-prefixed stream covers.
-    if (path.startsWith('webdav://stream://')) {
-      path = path.substring(8);
-    }
+    _requireAccount();
     // Local extracted images (offline fallback)
     if (path.startsWith('file://')) {
       return File(path.substring(7)).readAsBytes();
     }
     // Streaming CBZ entry / cover (first image when no ::entry)
+    if (WebDavResourceRef.isReference(path)) {
+      final ref = WebDavResourceRef.parse(path);
+      if (ref.accountId != accountId) {
+        throw WebDavAccountMismatchException(accountId, ref.accountId);
+      }
+      if (ref.isStream) return loadStreamImage(path);
+      if (ref.kind != WebDavResourceKind.image) {
+        throw Exception('Invalid WebDAV image reference');
+      }
+      path = ref.remotePath;
+    } else {
+      throw Exception('Unbound WebDAV image reference');
+    }
     if (path.startsWith('stream://')) {
       return loadStreamImage(path);
     }
@@ -407,6 +485,7 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load contents of a specific directory for browsing.
   Future<void> loadDirectory(String path) async {
+    _requireAccount();
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -486,12 +565,21 @@ class WebDavProvider with ChangeNotifier {
     _streamingReaders.clear();
     _archiveSizes.clear();
     _comicInfoRequests.clear();
-    _client = WebDavComicClient();
+    final account = WebDavAccounts.find(accountId);
+    if (account == null) throw WebDavAccountMissingException(accountId);
+    _client = WebDavComicClient(account);
     await loadComics(forceRefresh: true);
   }
 
   /// Load info.json from a comic directory (with caching).
   Future<ComicInfo?> loadComicInfo(String comicPath) async {
+    _requireAccount();
+    final ref = WebDavResourceRef.parse(comicPath);
+    _checkAccount(ref);
+    if (ref.kind != WebDavResourceKind.comic) {
+      throw const FormatException('Expected a WebDAV comic reference');
+    }
+    comicPath = ref.remotePath;
     final cacheKey = _cacheKey('webdav_info_v2', comicPath);
     final pending = _comicInfoRequests[cacheKey];
     if (pending != null) return pending;
@@ -537,6 +625,7 @@ class WebDavProvider with ChangeNotifier {
   }
 
   Future<void> testConnection() async {
+    _requireAccount();
     await _client.testConnection();
   }
 }

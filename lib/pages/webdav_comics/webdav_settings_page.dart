@@ -90,7 +90,16 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
       _testResult = null;
     });
     try {
-      await WebDavComicClient().testConnection(
+      await WebDavComicClient(
+        WebDavAccount(
+          id: 'test',
+          name: _nameController.text,
+          url: _urlController.text,
+          user: _userController.text,
+          pass: _passController.text,
+          path: _pathController.text,
+        ),
+      ).testConnection(
         url: _urlController.text,
         user: _userController.text,
         pass: _passController.text,
@@ -141,7 +150,9 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
       await WebDavAccounts.update(account);
       await WebDavAccounts.setActive(account.id);
     }
-    WebDavProvider().refresh();
+    if (_activeId != null && WebDavAccounts.find(_activeId!) != null) {
+      WebDavProvider.forAccount(_activeId!).refresh();
+    }
     _reload();
     if (mounted) {
       context.showMessage(message: 'Settings saved'.tl);
@@ -173,7 +184,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
     );
     if (ok != true) return;
     await WebDavAccounts.remove(_activeId!);
-    WebDavProvider().refresh();
+    WebDavProvider.release(_activeId!);
     _editingNew = false;
     _reload();
     if (_accounts.isEmpty) {
@@ -259,13 +270,16 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       trailing: selected
-                          ? Text('Active'.tl,
-                              style: ts.s12
-                                  .withColor(context.colorScheme.primary))
+                          ? Text(
+                              'Active'.tl,
+                              style: ts.s12.withColor(
+                                context.colorScheme.primary,
+                              ),
+                            )
                           : null,
                       onTap: () async {
                         await WebDavAccounts.setActive(a.id);
-                        WebDavProvider().refresh();
+                        WebDavProvider.forAccount(a.id).refresh();
                         _editingNew = false;
                         _reload();
                       },
@@ -337,8 +351,9 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.wifi_find),
                         label: Text(
@@ -455,8 +470,10 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
         hintText: hint,
         prefixIcon: icon != null ? Icon(icon) : null,
         border: const OutlineInputBorder(),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
+        ),
       ),
     );
   }
@@ -549,8 +566,10 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
     if (_currentPath == '/') return;
     var withoutTrailing = _currentPath;
     if (withoutTrailing.endsWith('/')) {
-      withoutTrailing =
-          withoutTrailing.substring(0, withoutTrailing.length - 1);
+      withoutTrailing = withoutTrailing.substring(
+        0,
+        withoutTrailing.length - 1,
+      );
     }
     final lastSlash = withoutTrailing.lastIndexOf('/');
     _currentPath = withoutTrailing.substring(0, lastSlash + 1);
@@ -579,8 +598,10 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
                     onPressed: _currentPath == '/' ? null : _goUp,
                     tooltip: 'Parent directory'.tl,
                     padding: EdgeInsets.zero,
-                    constraints:
-                        const BoxConstraints(minWidth: 32, minHeight: 32),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
                   ),
                   const SizedBox(width: 4),
                   Expanded(
@@ -598,54 +619,59 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _error != null
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.error_outline,
-                                  size: 36, color: Colors.red),
-                              const SizedBox(height: 8),
-                              Text(_error!,
-                                  style: ts.s14, textAlign: TextAlign.center),
-                              const SizedBox(height: 8),
-                              TextButton(
-                                onPressed: _loadDir,
-                                child: Text('Retry'.tl),
-                              ),
-                            ],
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            size: 36,
+                            color: Colors.red,
                           ),
-                        )
-                      : _entries.isEmpty
-                          ? Center(
-                              child: Text(
-                                'No subdirectories'.tl,
-                                style: ts.s14.copyWith(
-                                  color: context.colorScheme.outline,
-                                ),
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: _entries.length,
-                              itemBuilder: (context, index) {
-                                final entry = _entries[index];
-                                return ListTile(
-                                  leading: const Icon(Icons.folder,
-                                      color: Colors.amber),
-                                  title: Text(entry.name),
-                                  dense: true,
-                                  onTap: () => _goInto(entry),
-                                );
-                              },
-                            ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _error!,
+                            style: ts.s14,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: _loadDir,
+                            child: Text('Retry'.tl),
+                          ),
+                        ],
+                      ),
+                    )
+                  : _entries.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No subdirectories'.tl,
+                        style: ts.s14.copyWith(
+                          color: context.colorScheme.outline,
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _entries.length,
+                      itemBuilder: (context, index) {
+                        final entry = _entries[index];
+                        return ListTile(
+                          leading: const Icon(
+                            Icons.folder,
+                            color: Colors.amber,
+                          ),
+                          title: Text(entry.name),
+                          dense: true,
+                          onTap: () => _goInto(entry),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => context.pop(),
-          child: Text('Cancel'.tl),
-        ),
+        TextButton(onPressed: () => context.pop(), child: Text('Cancel'.tl)),
         FilledButton(
           onPressed: () {
             widget.onSelected(_currentPath);

@@ -48,8 +48,9 @@ class _ReaderWithLoadingState
     );
     if (widget.sourceKey == 'webdav') {
       try {
-        final provider = WebDavProvider();
-        final path = widget.id;
+        final ref = WebDavResourceRef.parse(widget.id);
+        final provider = WebDavProvider.forAccount(ref.accountId);
+        final path = ref.remotePath;
         final name = path.split('/').where((s) => s.isNotEmpty).last;
         ComicChapters? chapters;
         if (path.endsWith('/')) {
@@ -57,7 +58,8 @@ class _ReaderWithLoadingState
           if (chapterList.isNotEmpty) {
             final map = <String, String>{};
             for (final c in chapterList) {
-              map[c.path] = c.name;
+              map[WebDavResourceRef.chapter(ref.accountId, c.path).encode()] =
+                  c.name;
             }
             chapters = ComicChapters(map);
           }
@@ -65,17 +67,16 @@ class _ReaderWithLoadingState
         final model = _WebDavReaderHistoryModel(
           title: name,
           cover: history?.cover ?? '',
-          id: path,
+          id: widget.id,
           maxPage: history?.maxPage,
         );
         return Res(
           ReaderProps(
             type: ComicType.webdav,
-            cid: path,
+            cid: widget.id,
             name: name,
             chapters: chapters,
-            history: history ??
-                History.fromModel(model: model, ep: 0, page: 0),
+            history: history ?? History.fromModel(model: model, ep: 0, page: 0),
             author: '',
             tags: const [],
           ),

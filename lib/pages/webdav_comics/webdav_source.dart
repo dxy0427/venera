@@ -26,5 +26,6 @@ export 'webdav_comics_page.dart';
 export 'webdav_image_provider.dart';
 export 'webdav_models.dart';
 export 'webdav_provider.dart';
+export 'webdav_references.dart';
 export 'webdav_settings_page.dart';
 export 'streaming_zip.dart';

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:venera/foundation/image_provider/base_image_provider.dart';
 
 import 'webdav_image_provider.dart' as image_provider;
-import 'webdav_accounts.dart';
 import 'webdav_provider.dart';
+import 'webdav_references.dart';
 
 /// Image provider that loads images from WebDAV server.
 ///
@@ -21,6 +21,8 @@ class WebDavImageProvider
 
   const WebDavImageProvider(this.path);
 
+  String get accountId => WebDavResourceRef.parse(path).accountId;
+
   @override
   Future<WebDavImageProvider> obtainKey(ImageConfiguration configuration) {
     return SynchronousFuture(this);
@@ -29,11 +31,11 @@ class WebDavImageProvider
   @override
   Future<Uint8List> load(chunkEvents, checkStop) async {
     checkStop();
-    return WebDavProvider().loadImage(path);
+    return WebDavProvider.forAccount(accountId).loadImage(path);
   }
 
   @override
-  String get key => '${WebDavAccounts.activeId() ?? 'default'}@$path';
+  String get key => path;
 }
 
 /// Image provider specifically for WebDAV comic reader images.
@@ -50,6 +52,8 @@ class WebDavReaderImageProvider
     this.onLoadFailed,
   });
 
+  String get accountId => WebDavResourceRef.parse(path).accountId;
+
   @override
   Future<WebDavReaderImageProvider> obtainKey(
     ImageConfiguration configuration,
@@ -60,7 +64,7 @@ class WebDavReaderImageProvider
   @override
   Future<Uint8List> load(chunkEvents, checkStop) async {
     checkStop();
-    return WebDavProvider().loadImage(path);
+    return WebDavProvider.forAccount(accountId).loadImage(path);
   }
 
   @override
@@ -69,5 +73,5 @@ class WebDavReaderImageProvider
   }
 
   @override
-  String get key => '${WebDavAccounts.activeId() ?? 'default'}@$path@$page';
+  String get key => '$path@$page';
 }

@@ -8,7 +8,7 @@ import 'webdav_image_provider.dart';
 import 'webdav_models.dart';
 import 'webdav_provider.dart';
 import 'webdav_settings_page.dart';
-import 'webdav_accounts.dart';
+import 'webdav_references.dart';
 
 /// Sort mode for WebDAV comics.
 enum WebDavSortMode {
@@ -35,13 +35,21 @@ class _PathSegment {
 
 /// Main page for browsing WebDAV comics.
 class WebDavComicsPage extends StatefulWidget {
-  const WebDavComicsPage({super.key});
+  final String accountId;
+  final String? displayName;
+
+  const WebDavComicsPage({
+    super.key,
+    required this.accountId,
+    this.displayName,
+  });
 
   @override
   State<WebDavComicsPage> createState() => _WebDavComicsPageState();
 }
 
 class _WebDavComicsPageState extends State<WebDavComicsPage> {
+  late final WebDavProvider _provider;
   WebDavSortMode _sortMode = WebDavSortMode.titleAsc;
 
   /// Display titles from info.json (path -> title).
@@ -56,10 +64,11 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
   @override
   void initState() {
     super.initState();
-    _infoAccountId = WebDavAccounts.activeId();
-    WebDavProvider().addListener(_onUpdate);
-    if (WebDavProvider().comics == null && !WebDavProvider().isLoading) {
-      WebDavProvider().loadComics();
+    _infoAccountId = widget.accountId;
+    _provider = WebDavProvider.forAccount(widget.accountId);
+    _provider.addListener(_onUpdate);
+    if (_provider.comics == null && !_provider.isLoading) {
+      _provider.loadComics();
     }
   }
 
@@ -68,7 +77,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       _breadcrumbs.add(_PathSegment(name: name, path: _currentPath ?? ''));
       _currentPath = path;
     });
-    WebDavProvider().loadDirectory(path);
+    _provider.loadDirectory(path);
   }
 
   void _navigateBack() {
@@ -78,9 +87,9 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
         _currentPath = prev.path.isEmpty ? null : prev.path;
       });
       if (_currentPath == null) {
-        WebDavProvider().loadComics(forceRefresh: true);
+        _provider.loadComics(forceRefresh: true);
       } else {
-        WebDavProvider().loadDirectory(_currentPath!);
+        _provider.loadDirectory(_currentPath!);
       }
     } else {
       context.pop();
@@ -92,17 +101,17 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       _breadcrumbs.clear();
       _currentPath = null;
     });
-    WebDavProvider().loadComics(forceRefresh: true);
+    _provider.loadComics(forceRefresh: true);
   }
 
   @override
   void dispose() {
-    WebDavProvider().removeListener(_onUpdate);
+    _provider.removeListener(_onUpdate);
     super.dispose();
   }
 
   void _onUpdate() {
-    final accountId = WebDavAccounts.activeId();
+    final accountId = widget.accountId;
     if (accountId != _infoAccountId) {
       _infoAccountId = accountId;
       _infoTitles.clear();
@@ -112,7 +121,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = WebDavProvider();
+    final provider = _provider;
 
     return Scaffold(
       body: SmoothCustomScrollView(
@@ -129,7 +138,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
                       ),
                     ),
                   )
-                : Text('WebDAV Comics'.tl),
+                : Text(widget.displayName ?? 'WebDAV Comics'.tl),
             leading: IconButton(
               icon: const Icon(Icons.arrow_back),
               onPressed: _navigateBack,
@@ -150,9 +159,9 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
                 icon: const Icon(Icons.refresh),
                 onPressed: () {
                   if (_currentPath != null) {
-                    WebDavProvider().loadDirectory(_currentPath!);
+                    _provider.loadDirectory(_currentPath!);
                   } else {
-                    provider.refresh();
+                    _provider.refresh();
                   }
                 },
                 tooltip: 'Refresh'.tl,
@@ -191,7 +200,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
           Text(error, style: ts.s14, textAlign: TextAlign.center),
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: () => WebDavProvider().refresh(),
+            onPressed: () => _provider.refresh(),
             child: Text('Retry'.tl),
           ),
         ],
@@ -272,7 +281,9 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       await Future.wait(
         batch.map((c) async {
           try {
-            final info = await WebDavProvider().loadComicInfo(c.path);
+            final info = await _provider.loadComicInfo(
+              WebDavResourceRef.comic(widget.accountId, c.path).encode(),
+            );
             final t = info?.title?.trim();
             _infoTitles[_titleKey(c.path)] = (t != null && t.isNotEmpty)
                 ? t
@@ -345,6 +356,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
         return _WebDavComicCard(
           comic: sorted[index],
           title: _displayTitle(sorted[index]),
+          accountId: widget.accountId,
           onTap: () => _openComic(sorted[index]),
         );
       }, childCount: sorted.length),
@@ -352,7 +364,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
   }
 
   List<WebDavComicEntry> get _currentComics {
-    return WebDavProvider().directoryEntries ?? WebDavProvider().comics ?? [];
+    return _provider.directoryEntries ?? _provider.comics ?? [];
   }
 
   void _openComic(WebDavComicEntry comic) {
@@ -363,16 +375,21 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       // Open standard ComicPage (same UI as network sources)
       final raw = comic.coverPath;
       final cover = raw == null || raw.isEmpty
-          ? (!comic.isDirectory ? 'stream://${comic.path}' : null)
-          : (raw.startsWith('webdav://') ||
-                    raw.startsWith('stream://') ||
-                    raw.startsWith('file://') ||
-                    raw.startsWith('http')
-                ? raw
-                : 'webdav://$raw');
+          ? (!comic.isDirectory
+                ? WebDavResourceRef.stream(
+                    widget.accountId,
+                    comic.path,
+                  ).encode()
+                : null)
+          : (raw.startsWith('stream://')
+                ? WebDavResourceRef.stream(
+                    widget.accountId,
+                    raw.substring(9),
+                  ).encode()
+                : WebDavResourceRef.image(widget.accountId, raw).encode());
       context.to(
         () => ComicPage(
-          id: comic.path,
+          id: WebDavResourceRef.comic(widget.accountId, comic.path).encode(),
           sourceKey: 'webdav',
           title: _displayTitle(comic),
           cover: cover,
@@ -386,11 +403,13 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
 class _WebDavComicCard extends StatelessWidget {
   final WebDavComicEntry comic;
   final String title;
+  final String accountId;
   final VoidCallback onTap;
 
   const _WebDavComicCard({
     required this.comic,
     required this.title,
+    required this.accountId,
     required this.onTap,
   });
 
@@ -434,7 +453,14 @@ class _WebDavComicCard extends StatelessWidget {
   Widget _buildCover(BuildContext context) {
     if (comic.coverPath != null) {
       return Image(
-        image: WebDavImageProvider(comic.coverPath!),
+        image: WebDavImageProvider(
+          comic.coverPath!.startsWith('stream://')
+              ? WebDavResourceRef.stream(
+                  accountId,
+                  comic.coverPath!.substring(9),
+                ).encode()
+              : WebDavResourceRef.image(accountId, comic.coverPath!).encode(),
+        ),
         fit: BoxFit.cover,
         width: double.infinity,
         errorBuilder: (_, __, ___) => _buildPlaceholder(),

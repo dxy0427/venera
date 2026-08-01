@@ -14,24 +14,20 @@ ImageProvider? _findImageProvider(Comic comic) {
     image = FileImage(localComic.coverFile);
   } else if (comic.sourceKey == 'webdav') {
     var cover = comic.cover;
-    if (cover.startsWith('webdav://stream://')) {
-      cover = cover.substring(8);
-    }
     if (cover.startsWith('file://')) {
       image = FileImage(File(cover.substring(7)));
+    } else if (cover.startsWith('http://') ||
+        cover.startsWith('https://')) {
+      image = CachedImageProvider(cover);
     } else if (cover.isNotEmpty) {
       image = WebDavImageProvider(cover);
     } else {
       // No stored cover: stream first image for archives, else path as file.
       final id = comic.id;
-      final lower = id.toLowerCase();
-      if (lower.endsWith('.cbz') || lower.endsWith('.zip')) {
-        image = WebDavImageProvider('stream://$id');
-      } else {
-        image = WebDavImageProvider(
-          id.startsWith('webdav://') ? id : 'webdav://$id',
-        );
-      }
+      final ref = WebDavResourceRef.parse(id);
+      image = WebDavImageProvider(
+        WebDavResourceRef.stream(ref.accountId, ref.remotePath).encode(),
+      );
     }
   } else {
     image = CachedImageProvider(

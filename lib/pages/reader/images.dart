@@ -695,7 +695,8 @@ class _GalleryModeState extends State<_GalleryMode>
       return await File(imageKey.substring(7)).readAsBytes();
     } else if (imageKey.startsWith('webdav://') ||
         imageKey.startsWith('stream://')) {
-      return await WebDavProvider().loadImage(imageKey);
+      final ref = WebDavResourceRef.parse(imageKey);
+      return await WebDavProvider.forAccount(ref.accountId).loadImage(imageKey);
     } else {
       return (await CacheManager().findCache(
         "$imageKey@${context.reader.type.sourceKey}@${context.reader.cid}@${context.reader.eid}",
@@ -1290,7 +1291,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
       return await File(imageKey.substring(7)).readAsBytes();
     } else if (imageKey.startsWith('webdav://') ||
         imageKey.startsWith('stream://')) {
-      return await WebDavProvider().loadImage(imageKey);
+      final ref = WebDavResourceRef.parse(imageKey);
+      return await WebDavProvider.forAccount(ref.accountId).loadImage(imageKey);
     } else {
       return (await CacheManager().findCache(
         "$imageKey@${context.reader.type.sourceKey}@${context.reader.cid}@${context.reader.eid}",
@@ -1376,7 +1378,8 @@ void _preDownloadImage(int page, BuildContext context) {
   }
   // WebDAV images are cached by WebDavProvider.loadImage
   if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
-    WebDavProvider().loadImage(imageKey);
+    final ref = WebDavResourceRef.parse(imageKey);
+    WebDavProvider.forAccount(ref.accountId).loadImage(imageKey);
     return;
   }
   var cid = reader.cid;

@@ -21,6 +21,7 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/pages/local_comics/local_builtin_source.dart';
 import 'package:venera/pages/webdav_comics/webdav_image_provider.dart';
+import 'package:venera/pages/webdav_comics/webdav_references.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/network/cache.dart';
@@ -45,6 +46,19 @@ part 'comments_preview.dart';
 part 'actions.dart';
 
 part 'cover_viewer.dart';
+
+ImageProvider _buildWebDavCoverProvider(String cover) {
+  if (cover.startsWith('http://') || cover.startsWith('https://')) {
+    return CachedImageProvider(cover);
+  }
+  try {
+    final ref = WebDavResourceRef.parse(cover);
+    if (ref.kind == WebDavResourceKind.image || ref.isStream) {
+      return WebDavImageProvider(cover);
+    }
+  } catch (_) {}
+  return const AssetImage('assets/app_icon.png');
+}
 
 class ComicPage extends StatefulWidget {
   const ComicPage({
@@ -309,7 +323,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     if (sourceKey == 'webdav' ||
         cover.startsWith('webdav://') ||
         cover.startsWith('stream://')) {
-      return WebDavImageProvider(cover.isEmpty ? cid : cover);
+      return _buildWebDavCoverProvider(cover);
     }
     return CachedImageProvider(cover, sourceKey: sourceKey, cid: cid);
   }
@@ -1145,7 +1159,7 @@ class _ComicPageLoadingPlaceHolder extends StatelessWidget {
       } else if (sourceKey == 'webdav' ||
           cover!.startsWith('webdav://') ||
           cover!.startsWith('stream://')) {
-        image = WebDavImageProvider(cover!);
+        image = _buildWebDavCoverProvider(cover!);
       } else {
         image = CachedImageProvider(cover!, sourceKey: sourceKey, cid: cid);
       }

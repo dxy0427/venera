@@ -10,6 +10,7 @@ import 'package:venera/utils/natural_sort.dart';
 
 import 'webdav_accounts.dart';
 import 'webdav_models.dart';
+import 'webdav_references.dart';
 
 /// Supported image extensions for comic detection.
 const _imageExtensions = {
@@ -30,6 +31,10 @@ const _archiveExtensions = {'.cbz', '.zip'};
 
 /// WebDAV client wrapper for comic browsing.
 class WebDavComicClient {
+  final WebDavAccount account;
+
+  WebDavComicClient(this.account);
+
   webdav.Client? _client;
   String? _lastUrl;
   String? _lastUser;
@@ -81,41 +86,13 @@ class WebDavComicClient {
   Future<List<dynamic>> readDirectory(String path) => _readDir(path);
 
   List<String>? getConfig() {
-    final active = WebDavAccounts.active();
-    if (active != null && active.isValid) {
-      return active.configTriple;
-    }
-    final config = appdata.settings['webdavComicSource'];
-    if (config is List && config.whereType<String>().length == 3) {
-      final values = config.whereType<String>().toList();
-      if (values[0].trim().isNotEmpty) {
-        return values;
-      }
-    }
-    // Fall back to the general WebDAV config
-    final generalConfig = appdata.settings['webdav'];
-    if (generalConfig is List &&
-        generalConfig.whereType<String>().length == 3) {
-      final values = generalConfig.whereType<String>().toList();
-      if (values[0].trim().isNotEmpty) {
-        return values;
-      }
-    }
-    return null;
+    return account.isValid ? account.configTriple : null;
   }
 
   bool get isConfigured => getConfig() != null;
 
   String get remotePath {
-    final active = WebDavAccounts.active();
-    if (active != null) {
-      return active.normalizedPath;
-    }
-    final path = appdata.settings['webdavComicPath'];
-    if (path is String && path.trim().isNotEmpty) {
-      return _normalizePath(path);
-    }
-    return '/';
+    return account.normalizedPath;
   }
 
   static String _normalizePath(String path) {
@@ -126,33 +103,23 @@ class WebDavComicClient {
     return result;
   }
 
-  /// Save WebDAV comic source configuration for the active account.
+  /// Save WebDAV comic source configuration for the selected account.
   static Future<void> saveConfig({
+    required String accountId,
     required String url,
     required String user,
     required String pass,
     required String path,
     String? name,
   }) async {
-    final active = WebDavAccounts.active();
-    if (active != null) {
-      active.url = url.trim();
-      active.user = user.trim();
-      active.pass = pass;
-      active.path = path;
-      if (name != null && name.trim().isNotEmpty) {
-        active.name = name.trim();
-      }
-      await WebDavAccounts.update(active);
-      return;
-    }
-    await WebDavAccounts.add(
-      name: name?.trim().isNotEmpty == true ? name!.trim() : 'WebDAV',
-      url: url,
-      user: user,
-      pass: pass,
-      path: path,
-    );
+    final account = WebDavAccounts.find(accountId);
+    if (account == null) throw WebDavAccountMissingException(accountId);
+    account.url = url.trim();
+    account.user = user.trim();
+    account.pass = pass;
+    account.path = path;
+    if (name != null && name.trim().isNotEmpty) account.name = name.trim();
+    await WebDavAccounts.update(account);
   }
 
   /// Test the connection.
