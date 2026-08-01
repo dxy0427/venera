@@ -106,7 +106,9 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
 
   @override
   void dispose() {
-    _provider.removeListener(_onUpdate);
+    if (!_provider.isDisposed) {
+      _provider.removeListener(_onUpdate);
+    }
     super.dispose();
   }
 

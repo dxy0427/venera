@@ -50,12 +50,22 @@ class WebDavProvider with ChangeNotifier {
     }
   }
 
+  bool _disposed = false;
+  bool get isDisposed => _disposed;
+
   void disposeProvider() {
+    _disposed = true;
     for (final info in _streamingReaders.values) {
       info.reader.dispose();
     }
     _streamingReaders.clear();
     dispose();
+  }
+
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
   }
 
   List<WebDavComicEntry>? _comics;

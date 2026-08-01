@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
@@ -214,7 +216,9 @@ class WebDavBuiltinSource {
       null,
       null,
     );
-    source.data['accounts'] = WebDavAccounts.list().toString();
+    source.data['accounts'] = jsonEncode(
+      WebDavAccounts.list().map((e) => e.toJson()).toList(),
+    );
     return source;
   }
 
