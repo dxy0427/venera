@@ -40,6 +40,7 @@ class WebDavComicClient {
   String? _lastUser;
   String? _lastPass;
   final Map<String, Future<List<dynamic>>> _directoryCache = {};
+  final Map<String, Future<String?>> _coverPathCache = {};
 
   /// Get or create a WebDAV client from settings.
   webdav.Client getClient() {
@@ -71,6 +72,7 @@ class WebDavComicClient {
     _lastUser = user;
     _lastPass = pass;
     _directoryCache.clear();
+    _coverPathCache.clear();
     return _client!;
   }
 
@@ -81,7 +83,10 @@ class WebDavComicClient {
     );
   }
 
-  void clearDirectoryCache() => _directoryCache.clear();
+  void clearDirectoryCache() {
+    _directoryCache.clear();
+    _coverPathCache.clear();
+  }
 
   Future<List<dynamic>> readDirectory(String path) => _readDir(path);
 
@@ -309,7 +314,33 @@ class WebDavComicClient {
     if (comic.coverPath != null && comic.coverPath!.isNotEmpty) {
       return comic.coverPath;
     }
-    if (comic.isDirectory) {
+    final pending = _coverPathCache[comic.path];
+    if (pending != null) {
+      try {
+        final path = await pending;
+        comic.coverPath = path;
+        return path;
+      } catch (_) {
+        if (identical(_coverPathCache[comic.path], pending)) {
+          _coverPathCache.remove(comic.path);
+        }
+        rethrow;
+      }
+    }
+    final request = _resolveCoverPath(comic.path, comic.isDirectory);
+    _coverPathCache[comic.path] = request;
+    try {
+      final path = await request;
+      comic.coverPath = path;
+      return path;
+    } catch (_) {
+      _coverPathCache.remove(comic.path);
+      rethrow;
+    }
+  }
+
+  Future<String?> _resolveCoverPath(String comicPath, bool isDirectory) async {
+    if (isDirectory) {
       try {
         final coverNames = {
           'cover.jpg',
@@ -327,7 +358,7 @@ class WebDavComicClient {
           '封面.jpeg',
           '封面.png',
         };
-        final items = await _readDir(comic.path);
+        final items = await _readDir(comicPath);
         String? firstImage;
         String? firstArchive;
         for (final item in items) {
@@ -337,32 +368,28 @@ class WebDavComicClient {
           final lower = name.toLowerCase();
           final ext = _getExtension(name).toLowerCase();
           if (coverNames.contains(lower)) {
-            comic.coverPath = '${comic.path}$name';
-            return comic.coverPath;
+            return '$comicPath$name';
           }
           if (firstImage == null && _imageExtensions.contains(ext)) {
-            firstImage = '${comic.path}$name';
+            firstImage = '$comicPath$name';
           }
           if (firstArchive == null && _archiveExtensions.contains(ext)) {
-            firstArchive = '${comic.path}$name';
+            firstArchive = '$comicPath$name';
           }
         }
         if (firstImage != null) {
-          comic.coverPath = firstImage;
-          return comic.coverPath;
+          return firstImage;
         }
         if (firstArchive != null) {
           // Cover will be loaded via stream from the archive entry later.
-          comic.coverPath = 'stream://$firstArchive';
-          return comic.coverPath;
+          return 'stream://$firstArchive';
         }
       } catch (_) {}
       return null;
     }
 
     // Archive comic (cbz/zip): cover is streamed from first image entry.
-    comic.coverPath = 'stream://${comic.path}';
-    return comic.coverPath;
+    return 'stream://$comicPath';
   }
 
   /// Load a cover image for a comic entry.

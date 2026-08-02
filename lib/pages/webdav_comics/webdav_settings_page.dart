@@ -139,6 +139,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
       _editingNew = false;
       _activeId = account.id;
     } else {
+      final previous = WebDavAccounts.find(_activeId!);
       final account = WebDavAccount(
         id: _activeId!,
         name: name,
@@ -147,11 +148,16 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
         pass: _passController.text,
         path: _pathController.text,
       );
-      await WebDavAccounts.update(account);
-      await WebDavAccounts.setActive(account.id);
-    }
-    if (_activeId != null && WebDavAccounts.find(_activeId!) != null) {
-      WebDavProvider.forAccount(_activeId!).refresh();
+      final connectionChanged =
+          previous == null ||
+          previous.url != account.url ||
+          previous.user != account.user ||
+          previous.pass != account.pass ||
+          previous.path != account.path;
+      await WebDavAccounts.update(account, activeId: account.id);
+      if (connectionChanged) {
+        WebDavProvider.existing(account.id)?.refresh();
+      }
     }
     _reload();
     if (mounted) {
@@ -279,7 +285,6 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                           : null,
                       onTap: () async {
                         await WebDavAccounts.setActive(a.id);
-                        WebDavProvider.forAccount(a.id).refresh();
                         _editingNew = false;
                         _reload();
                       },

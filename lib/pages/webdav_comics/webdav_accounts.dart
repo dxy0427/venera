@@ -92,6 +92,7 @@ class WebDavAccounts {
   static Future<void> setActive(String id) async {
     final accounts = list();
     if (!accounts.any((e) => e.id == id)) return;
+    if (appdata.settings[_activeKey]?.toString() == id) return;
     appdata.settings[_activeKey] = id;
     await appdata.saveData(false);
     _notifySourceChanged();
@@ -118,14 +119,14 @@ class WebDavAccounts {
     return account;
   }
 
-  static Future<void> update(WebDavAccount account) async {
+  static Future<void> update(WebDavAccount account, {String? activeId}) async {
     final accounts = list();
     final i = accounts.indexWhere((e) => e.id == account.id);
     if (i < 0) return;
     accounts[i] = account;
     await _saveAll(
       accounts,
-      activeId: appdata.settings[_activeKey]?.toString(),
+      activeId: activeId ?? appdata.settings[_activeKey]?.toString(),
     );
   }
 

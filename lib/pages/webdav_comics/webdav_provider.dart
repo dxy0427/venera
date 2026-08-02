@@ -37,6 +37,8 @@ class WebDavProvider with ChangeNotifier {
     return _instances.putIfAbsent(accountId, () => WebDavProvider._(accountId));
   }
 
+  static WebDavProvider? existing(String accountId) => _instances[accountId];
+
   static void release(String accountId) {
     _instances.remove(accountId)?.disposeProvider();
   }
@@ -566,6 +568,20 @@ class WebDavProvider with ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    final current = _refreshTask;
+    if (current != null) return current;
+    final task = _refreshInternal();
+    _refreshTask = task;
+    try {
+      await task;
+    } finally {
+      if (identical(_refreshTask, task)) _refreshTask = null;
+    }
+  }
+
+  Future<void>? _refreshTask;
+
+  Future<void> _refreshInternal() async {
     _comics = null;
     _directoryEntries = null;
     _error = null;
