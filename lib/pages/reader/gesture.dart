@@ -212,7 +212,8 @@ class _ReaderGestureDetectorState
   );
 
   void onTap(Offset location) {
-    if (reader._imageViewController!.handleOnTap(location)) {
+    final controller = reader._imageViewController;
+    if (controller != null && controller.handleOnTap(location)) {
       return;
     } else if (context.readerScaffold.isOpen) {
       context.readerScaffold.openOrClose();
@@ -226,6 +227,8 @@ class _ReaderGestureDetectorState
         reader.type.sourceKey,
         'enableTapToTurnPages',
       )) {
+        // The image view is not available while the chapter is loading.
+        if (controller == null) return;
         bool isLeft = false, isRight = false, isTop = false, isBottom = false;
         final width = context.width;
         final height = context.height;
@@ -362,7 +365,8 @@ class _ReaderGestureDetectorState
 
   void copyImage(Offset location) async {
     var controller = reader._imageViewController;
-    var image = await controller!.getImageByOffset(location);
+    if (controller == null) return;
+    var image = await controller.getImageByOffset(location);
     if (image != null) {
       writeImageToClipboard(image);
     } else {
@@ -373,7 +377,8 @@ class _ReaderGestureDetectorState
 
   void saveImage(Offset location) async {
     var controller = reader._imageViewController;
-    var image = await controller!.getImageByOffset(location);
+    if (controller == null) return;
+    var image = await controller.getImageByOffset(location);
     if (image != null) {
       var filetype = detectFileType(image);
       saveFile(filename: "image${filetype.ext}", data: image);

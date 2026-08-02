@@ -277,6 +277,15 @@ class _GalleryModeState extends State<_GalleryMode>
     super.initState();
   }
 
+  @override
+  void dispose() {
+    if (identical(reader._imageViewController, this)) {
+      reader._imageViewController = null;
+    }
+    controller.dispose();
+    super.dispose();
+  }
+
   /// Get the range of images for the given page. [page] is 1-based.
   (int start, int end) getPageImagesRange(int page) {
     var imagesPerPage = reader.imagesPerPage;
@@ -810,6 +819,9 @@ class _ContinuousModeState extends State<_ContinuousMode>
   @override
   void dispose() {
     itemPositionsListener.itemPositions.removeListener(onPositionChanged);
+    if (identical(reader._imageViewController, this)) {
+      reader._imageViewController = null;
+    }
     super.dispose();
   }
 

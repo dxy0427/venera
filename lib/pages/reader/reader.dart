@@ -705,6 +705,8 @@ abstract mixin class _ReaderLocation {
 
   bool toPage(int page) {
     if (_validatePage(page)) {
+      final controller = _imageViewController;
+      if (controller == null) return false;
       if (page == this.page && page != 1 && page != totalPages) {
         return false;
       }
@@ -713,7 +715,7 @@ abstract mixin class _ReaderLocation {
         _pendingPage = page;
         _animationCount++;
         update();
-        _imageViewController!.animateToPage(page).then((_) {
+        controller.animateToPage(page).then((_) {
           _animationCount--;
           if (_pendingPage == page) {
             _pendingPage = null;
@@ -723,7 +725,7 @@ abstract mixin class _ReaderLocation {
       } else {
         this.page = page;
         update();
-        _imageViewController!.toPage(page);
+        controller.toPage(page);
       }
       return true;
     }
