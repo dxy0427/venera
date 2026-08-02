@@ -16,19 +16,52 @@ import 'webdav_references.dart';
 import 'streaming_zip.dart';
 import 'comic_info.dart';
 
+typedef WebDavStreamingReaderFactory =
+    StreamingZipReader Function({
+      required String webdavUrl,
+      required String user,
+      required String pass,
+      int? knownFileSize,
+    });
+
 /// Manages WebDAV comic state - connection, caching, and data.
 class WebDavProvider with ChangeNotifier {
   static final Map<String, WebDavProvider> _instances = {};
 
   final String accountId;
   late WebDavComicClient _client;
+  final WebDavStreamingReaderFactory _streamingReaderFactory;
 
-  WebDavProvider._(this.accountId) {
+  WebDavProvider._(this.accountId)
+    : _streamingReaderFactory = _createStreamingReader {
     final account = WebDavAccounts.find(accountId);
     if (account == null) {
       throw WebDavAccountMissingException(accountId);
     }
     _client = WebDavComicClient(account);
+  }
+
+  @visibleForTesting
+  WebDavProvider.forTesting({
+    required this.accountId,
+    required WebDavComicClient client,
+    WebDavStreamingReaderFactory? streamingReaderFactory,
+  }) : _client = client,
+       _streamingReaderFactory =
+           streamingReaderFactory ?? _createStreamingReader;
+
+  static StreamingZipReader _createStreamingReader({
+    required String webdavUrl,
+    required String user,
+    required String pass,
+    int? knownFileSize,
+  }) {
+    return StreamingZipReader(
+      webdavUrl: webdavUrl,
+      user: user,
+      pass: pass,
+      knownFileSize: knownFileSize,
+    );
   }
 
   factory WebDavProvider.forAccount(String accountId) {
@@ -57,6 +90,11 @@ class WebDavProvider with ChangeNotifier {
 
   void disposeProvider() {
     _disposed = true;
+    _contentRequestId++;
+    _streamingReaderGeneration++;
+    _streamingReaderRequests.clear();
+    _comicInfoRequests.clear();
+    _missingComicInfo.clear();
     for (final info in _streamingReaders.values) {
       info.reader.dispose();
     }
@@ -101,8 +139,10 @@ class WebDavProvider with ChangeNotifier {
   /// Load comics list from WebDAV server.
   Future<void> loadComics({bool forceRefresh = false}) async {
     _requireAccount();
-    if (_isLoading) return;
+    if (_isLoading && !forceRefresh) return;
     if (!isConfigured) {
+      _contentRequestId++;
+      _isLoading = false;
       _error = 'WebDAV not configured';
       notifyListeners();
       return;
@@ -110,6 +150,8 @@ class WebDavProvider with ChangeNotifier {
 
     if (!forceRefresh && _comics != null && _directoryEntries == null) return;
 
+    final requestId = ++_contentRequestId;
+    final client = _client;
     _isLoading = true;
     _error = null;
     _directoryEntries = null;
@@ -117,20 +159,32 @@ class WebDavProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      _comics = await _client.listComics();
-      if (_comics != null) _rememberEntrySizes(_comics!);
-      _loadCoversInBackground();
+      final comics = await client.listComics();
+      if (!_isCurrentContentRequest(requestId)) return;
+      _comics = comics;
+      _rememberEntrySizes(comics);
+      _loadCoversInBackground(comics, requestId, client);
     } catch (e) {
+      if (!_isCurrentContentRequest(requestId)) return;
       _error = e.toString();
       _comics = null;
       Log.error("WebDavProvider", "Failed to load comics: $e");
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (_isCurrentContentRequest(requestId)) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
-  Future<void> ensureCoverPaths(List<WebDavComicEntry> comics) async {
+  bool _isCurrentContentRequest(int requestId) =>
+      !_disposed && requestId == _contentRequestId;
+
+  Future<void> ensureCoverPaths(
+    List<WebDavComicEntry> comics, {
+    WebDavComicClient? client,
+  }) async {
+    final coverClient = client ?? _client;
     const batchSize = 6;
     for (var i = 0; i < comics.length; i += batchSize) {
       final batch = comics.skip(i).take(batchSize);
@@ -139,7 +193,7 @@ class WebDavProvider with ChangeNotifier {
           if (comic.isDirectory && comic.isCategory) return;
           if (comic.coverPath != null && comic.coverPath!.isNotEmpty) return;
           try {
-            await _client.resolveCoverPath(comic);
+            await coverClient.resolveCoverPath(comic);
           } catch (e) {
             Log.error(
               "WebDavProvider",
@@ -168,10 +222,15 @@ class WebDavProvider with ChangeNotifier {
     return result;
   }
 
-  void _loadCoversInBackground() async {
-    if (_comics == null) return;
-    await ensureCoverPaths(_comics!);
-    if (_comics != null) notifyListeners();
+  void _loadCoversInBackground(
+    List<WebDavComicEntry> comics,
+    int requestId,
+    WebDavComicClient client,
+  ) async {
+    await ensureCoverPaths(comics, client: client);
+    if (_isCurrentContentRequest(requestId) && identical(_comics, comics)) {
+      notifyListeners();
+    }
   }
 
   /// Get image paths for a comic.
@@ -257,7 +316,29 @@ class WebDavProvider with ChangeNotifier {
   Future<_StreamInfo> _ensureStreamReader(String remotePath) async {
     final existing = _streamingReaders[remotePath];
     if (existing != null) return existing;
+    final pending = _streamingReaderRequests[remotePath];
+    if (pending != null) return pending;
 
+    final generation = _streamingReaderGeneration;
+    final request = _createStreamReader(remotePath).then((info) {
+      if (_disposed || generation != _streamingReaderGeneration) {
+        info.reader.dispose();
+        throw StateError('WebDAV streaming reader was invalidated');
+      }
+      _streamingReaders[remotePath] = info;
+      return info;
+    });
+    _streamingReaderRequests[remotePath] = request;
+    try {
+      return await request;
+    } finally {
+      if (identical(_streamingReaderRequests[remotePath], request)) {
+        _streamingReaderRequests.remove(remotePath);
+      }
+    }
+  }
+
+  Future<_StreamInfo> _createStreamReader(String remotePath) async {
     final config = _client.getConfig();
     if (config == null) throw Exception('WebDAV not configured');
 
@@ -265,7 +346,7 @@ class WebDavProvider with ChangeNotifier {
     final fullPath = remotePath.startsWith('/') ? remotePath : '/$remotePath';
     final webdavUrl = WebDavComicClient.buildEncodedUrl(base, fullPath);
     final knownSize = _archiveSizes[remotePath];
-    final reader = StreamingZipReader(
+    final reader = _streamingReaderFactory(
       webdavUrl: webdavUrl,
       user: config[1],
       pass: config[2],
@@ -290,11 +371,9 @@ class WebDavProvider with ChangeNotifier {
       }).toList();
       imageEntries.sort((a, b) => naturalCompare(a.fileName, b.fileName));
       if (imageEntries.isEmpty) {
-        reader.dispose();
         throw Exception('No images in CBZ');
       }
       final info = _StreamInfo(reader: reader, entries: imageEntries);
-      _streamingReaders[remotePath] = info;
       return info;
     } catch (e) {
       reader.dispose();
@@ -320,8 +399,13 @@ class WebDavProvider with ChangeNotifier {
   /// Cache for streaming ZIP readers (in-memory; rebuilt on demand).
   final Map<String, _StreamInfo> _streamingReaders = {};
 
-  /// Avoid refetching info.json while the current account is being browsed.
+  /// Merge concurrent initialization for the same archive.
+  final Map<String, Future<_StreamInfo>> _streamingReaderRequests = {};
+  int _streamingReaderGeneration = 0;
+
+  /// Merge concurrent info.json requests. Completed requests use disk cache.
   final Map<String, Future<ComicInfo?>> _comicInfoRequests = {};
+  final Set<String> _missingComicInfo = {};
 
   /// PROPFIND sizes for archive paths (used by StreamingZipReader).
   final Map<String, int> _archiveSizes = {};
@@ -494,16 +578,20 @@ class WebDavProvider with ChangeNotifier {
   /// List of entries for current browsing directory.
   List<WebDavComicEntry>? _directoryEntries;
   List<WebDavComicEntry>? get directoryEntries => _directoryEntries;
+  int _contentRequestId = 0;
 
   /// Load contents of a specific directory for browsing.
   Future<void> loadDirectory(String path) async {
     _requireAccount();
+    final requestId = ++_contentRequestId;
+    final client = _client;
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final items = await _client.readDirectory(path);
+      final items = await client.readDirectory(path);
+      if (!_isCurrentContentRequest(requestId)) return;
       final entries = <WebDavComicEntry>[];
       final directoryItems = items.where((item) => item.isDir == true).toList();
       final comicDirectories = <String, bool>{};
@@ -514,12 +602,13 @@ class WebDavProvider with ChangeNotifier {
           batch.map((item) async {
             final name = item.name ?? '';
             if (name.isNotEmpty && name != '.') {
-              comicDirectories[name] = await _client.isComicDirectory(
+              comicDirectories[name] = await client.isComicDirectory(
                 '$path$name/',
               );
             }
           }),
         );
+        if (!_isCurrentContentRequest(requestId)) return;
       }
 
       for (final item in items) {
@@ -527,7 +616,7 @@ class WebDavProvider with ChangeNotifier {
         if (name.isEmpty || name == '.') continue;
 
         final isDir = item.isDir == true;
-        final ext = _client.getExtension(name).toLowerCase();
+        final ext = client.getExtension(name).toLowerCase();
 
         if (isDir) {
           // Check if this directory is a comic or a category
@@ -542,10 +631,10 @@ class WebDavProvider with ChangeNotifier {
               isCategory: !isComic,
             ),
           );
-        } else if (_client.isArchive(ext)) {
+        } else if (client.isArchive(ext)) {
           entries.add(
             WebDavComicEntry(
-              name: _client.cleanName(name),
+              name: client.cleanName(name),
               path: '$path$name',
               isDirectory: false,
               size: item.size ?? 0,
@@ -558,12 +647,15 @@ class WebDavProvider with ChangeNotifier {
       _directoryEntries = entries;
       _rememberEntrySizes(entries);
     } catch (e) {
+      if (!_isCurrentContentRequest(requestId)) return;
       _error = e.toString();
       _directoryEntries = null;
       Log.error("WebDavProvider", "Failed to load directory: $e");
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (_isCurrentContentRequest(requestId)) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -582,6 +674,8 @@ class WebDavProvider with ChangeNotifier {
   Future<void>? _refreshTask;
 
   Future<void> _refreshInternal() async {
+    _contentRequestId++;
+    _streamingReaderGeneration++;
     _comics = null;
     _directoryEntries = null;
     _error = null;
@@ -589,8 +683,10 @@ class WebDavProvider with ChangeNotifier {
       info.reader.dispose();
     }
     _streamingReaders.clear();
+    _streamingReaderRequests.clear();
     _archiveSizes.clear();
     _comicInfoRequests.clear();
+    _missingComicInfo.clear();
     final account = WebDavAccounts.find(accountId);
     if (account == null) throw WebDavAccountMissingException(accountId);
     _client = WebDavComicClient(account);
@@ -607,11 +703,18 @@ class WebDavProvider with ChangeNotifier {
     }
     comicPath = ref.remotePath;
     final cacheKey = _cacheKey('webdav_info_v2', comicPath);
+    if (_missingComicInfo.contains(cacheKey)) return null;
     final pending = _comicInfoRequests[cacheKey];
     if (pending != null) return pending;
     final request = _loadComicInfo(cacheKey, comicPath);
     _comicInfoRequests[cacheKey] = request;
-    return request;
+    try {
+      return await request;
+    } finally {
+      if (identical(_comicInfoRequests[cacheKey], request)) {
+        _comicInfoRequests.remove(cacheKey);
+      }
+    }
   }
 
   Future<ComicInfo?> _loadComicInfo(String cacheKey, String comicPath) async {
@@ -628,26 +731,36 @@ class WebDavProvider with ChangeNotifier {
         );
         return ComicInfo.fromJson(json);
       } catch (_) {
-        // Cache corrupted, re-fetch
+        await CacheManager().delete(cacheKey);
       }
     }
 
+    late Uint8List data;
     try {
       final infoPath = '${comicPath}info.json';
-      final data = await _client.readImage(infoPath);
+      data = await _client.readImage(infoPath);
+    } catch (e) {
+      if (_isNotFound(e)) _missingComicInfo.add(cacheKey);
+      return null;
+    }
 
-      await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
-
+    try {
       final content = utf8
           .decode(data, allowMalformed: true)
           .replaceFirst('\uFEFF', '');
       final json = Map<String, dynamic>.from(
         const JsonDecoder().convert(content) as Map,
       );
-      return ComicInfo.fromJson(json);
+      final info = ComicInfo.fromJson(json);
+      await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
+      return info;
     } catch (_) {
       return null;
     }
+  }
+
+  bool _isNotFound(Object error) {
+    return RegExp(r'\b404\b').hasMatch(error.toString());
   }
 
   Future<void> testConnection() async {

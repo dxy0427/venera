@@ -15,6 +15,7 @@ class StreamingZipReader {
   final String webdavUrl;
   final String user;
   final String pass;
+  late final Dio _dio;
 
   /// Optional size from WebDAV PROPFIND (avoids another HEAD round-trip).
   final int? knownFileSize;
@@ -28,10 +29,20 @@ class StreamingZipReader {
     required this.user,
     required this.pass,
     this.knownFileSize,
+    HttpClientAdapter? adapter,
   }) : _origin = Uri.parse(webdavUrl) {
     if (knownFileSize != null && knownFileSize! > 0) {
       _fileSize = knownFileSize;
     }
+    _dio = Dio(
+      BaseOptions(
+        followRedirects: false,
+        validateStatus: (s) => s != null && (s < 400 || _isRedirect(s)),
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
+        sendTimeout: const Duration(seconds: 15),
+      ),
+    )..httpClientAdapter = adapter ?? RHttpAdapter();
   }
 
   Map<String, String> get _authHeaders => {
@@ -89,18 +100,17 @@ class StreamingZipReader {
     int maxHops = 8,
   }) async {
     var url = startUrl;
-    final dio = AppDio(
-      BaseOptions(
-        followRedirects: false,
-        validateStatus: (s) => s != null && (s < 400 || _isRedirect(s)),
-      ),
-    );
+    final isRangeRequest =
+        extraHeaders?.keys.any((key) => key.toLowerCase() == 'range') == true;
 
     for (var hop = 0; hop < maxHops; hop++) {
       final headers = _headersFor(url, extra: extraHeaders);
       final response = method == 'HEAD'
-          ? await dio.head(url, options: Options(headers: headers))
-          : await dio.get(
+          ? await _dio.head(
+              url,
+              options: Options(headers: headers, responseType: responseType),
+            )
+          : await _dio.get(
               url,
               options: Options(headers: headers, responseType: responseType),
             );
@@ -108,24 +118,27 @@ class StreamingZipReader {
       if (_isRedirect(response.statusCode)) {
         final next = _absoluteLocation(response, url);
         if (next == null || next.isEmpty) {
+          await _cancelResponseBody(response);
           throw Exception(
             'Redirect without Location from ${Uri.parse(url).host}',
           );
         }
         // Never treat a redirect response as final download URL content.
+        await _cancelResponseBody(response);
         url = next;
         continue;
       }
 
       if (_isSuccess(response.statusCode)) {
-        _captureSize(response);
+        if (!isRangeRequest) _captureSize(response);
         // Cache final resolved URL for subsequent ranges.
-        if (method != 'HEAD' || !_sameOrigin(url)) {
+        if (!isRangeRequest && (method != 'HEAD' || !_sameOrigin(url))) {
           _cdnUrl = url;
         }
         return response;
       }
 
+      await _cancelResponseBody(response);
       throw Exception(
         '$method ${Uri.parse(url).host} failed with status '
         '${response.statusCode}',
@@ -134,37 +147,118 @@ class StreamingZipReader {
     throw Exception('Too many redirects');
   }
 
+  Future<void> _cancelResponseBody(Response response) async {
+    final body = response.data;
+    if (body is ResponseBody) {
+      final subscription = body.stream.listen((_) {});
+      await subscription.cancel();
+    }
+  }
+
+  Future<Uint8List> _readRangeResponse(
+    Response response,
+    int start,
+    int end,
+  ) async {
+    if (response.statusCode != HttpStatus.partialContent) {
+      await _cancelResponseBody(response);
+      throw Exception(
+        'Server ignored Range request bytes=$start-$end '
+        '(status ${response.statusCode})',
+      );
+    }
+
+    final rawContentRange = response.headers.value('content-range');
+    final match = RegExp(
+      r'^bytes\s+(\d+)-(\d+)/(\d+)$',
+      caseSensitive: false,
+    ).firstMatch(rawContentRange?.trim() ?? '');
+    if (match == null) {
+      await _cancelResponseBody(response);
+      throw Exception('Invalid Content-Range for bytes=$start-$end');
+    }
+
+    final actualStart = int.parse(match.group(1)!);
+    final actualEnd = int.parse(match.group(2)!);
+    final totalSize = int.parse(match.group(3)!);
+    if (actualStart != start || actualEnd != end) {
+      await _cancelResponseBody(response);
+      throw Exception(
+        'Unexpected Content-Range bytes=$actualStart-$actualEnd/$totalSize '
+        'for bytes=$start-$end',
+      );
+    }
+    if (_fileSize != null && _fileSize != totalSize) {
+      await _cancelResponseBody(response);
+      throw Exception('Remote archive size changed while reading');
+    }
+    _fileSize = totalSize;
+
+    final expectedLength = end - start + 1;
+    Uint8List bytes;
+    final body = response.data;
+    if (body is ResponseBody) {
+      final builder = BytesBuilder(copy: false);
+      var received = 0;
+      await for (final chunk in body.stream) {
+        received += chunk.length;
+        if (received > expectedLength) {
+          throw Exception(
+            'Range response exceeded expected length $expectedLength',
+          );
+        }
+        builder.add(chunk);
+      }
+      bytes = builder.takeBytes();
+    } else if (body is Uint8List) {
+      bytes = body;
+    } else if (body is List<int>) {
+      bytes = Uint8List.fromList(body);
+    } else {
+      throw Exception('Unexpected response type: ${body.runtimeType}');
+    }
+
+    if (bytes.length != expectedLength) {
+      throw Exception(
+        'Range response length ${bytes.length} did not match $expectedLength',
+      );
+    }
+
+    final finalUrl = response.realUri.toString();
+    if (finalUrl != webdavUrl) _cdnUrl = finalUrl;
+    return bytes;
+  }
+
   Future<Uint8List> _readRange(int start, int end) async {
     // Start from resolved CDN if known; otherwise from WebDAV so redirects
     // are followed manually without leaking Auth to foreign hosts.
     final startUrl = _cdnUrl ?? webdavUrl;
-    Response response;
     try {
-      response = await _request(
+      final response = await _request(
         'GET',
         startUrl,
-        extraHeaders: {'Range': 'bytes=$start-$end'},
-        responseType: ResponseType.bytes,
+        extraHeaders: {
+          'Range': 'bytes=$start-$end',
+          'Accept-Encoding': 'identity',
+        },
+        responseType: ResponseType.stream,
       );
+      return await _readRangeResponse(response, start, end);
     } catch (e) {
       if (startUrl == webdavUrl) rethrow;
       // Signed CDN URLs can expire during a long reading session.
       _cdnUrl = null;
-      response = await _request(
+      final response = await _request(
         'GET',
         webdavUrl,
-        extraHeaders: {'Range': 'bytes=$start-$end'},
-        responseType: ResponseType.bytes,
+        extraHeaders: {
+          'Range': 'bytes=$start-$end',
+          'Accept-Encoding': 'identity',
+        },
+        responseType: ResponseType.stream,
       );
+      return _readRangeResponse(response, start, end);
     }
-
-    if (response.data is Uint8List) {
-      return response.data as Uint8List;
-    }
-    if (response.data is List<int>) {
-      return Uint8List.fromList(response.data as List<int>);
-    }
-    throw Exception('Unexpected response type: ${response.data.runtimeType}');
   }
 
   Future<int> _getFileSize() async {
@@ -179,12 +273,7 @@ class StreamingZipReader {
       Log.info("StreamingZip", "size HEAD failed; falling back to ranged GET");
     }
 
-    await _request(
-      'GET',
-      webdavUrl,
-      extraHeaders: const {'Range': 'bytes=0-0'},
-      responseType: ResponseType.bytes,
-    );
+    await _readRange(0, 0);
     if (_fileSize != null) return _fileSize!;
     throw Exception('Cannot determine file size');
   }
@@ -340,6 +429,7 @@ class StreamingZipReader {
   }
 
   void dispose() {
+    _dio.close(force: true);
     _cdnUrl = null;
     _entries = null;
     _fileSize = null;
