@@ -488,14 +488,20 @@ class WebDavBuiltinSource {
       return;
     }
     final source = create();
-    final explorePages = List<String>.from(
-      appdata.settings['explore_pages'] ?? [],
-    );
-    final titles = source.explorePages.map((e) => e.title).toSet();
-    appdata.settings['explore_pages'] = [
-      ...explorePages.where((title) => titles.contains(title)),
-      ...titles.where((title) => !explorePages.contains(title)),
+    final explorePages = [
+      ...(appdata.settings['explore_pages'] ?? const <String>[]),
     ];
+    final titles = source.explorePages.map((e) => e.title).toSet();
+    final availableTitles = {
+      ...manager.all().expand(
+        (source) => source.explorePages.map((page) => page.title),
+      ),
+      ...titles,
+    };
+    appdata.settings['explore_pages'] = {
+      ...explorePages.where(availableTitles.contains),
+      ...titles.where((title) => !explorePages.contains(title)),
+    }.toList();
     appdata.saveData(false);
     manager.add(source);
   }
