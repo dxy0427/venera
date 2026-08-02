@@ -174,7 +174,9 @@ class StreamingZipReader {
       await _request('HEAD', webdavUrl);
       if (_fileSize != null) return _fileSize!;
     } catch (e) {
-      Log.warning("StreamingZip", "size HEAD failed: $e");
+      // Some CDNs reject HEAD (e.g. 403) but allow ranged GETs; the
+      // bytes=0-0 fallback below is authoritative.
+      Log.info("StreamingZip", "size HEAD failed, falling back to ranged GET: $e");
     }
 
     await _request(

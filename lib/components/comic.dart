@@ -1052,7 +1052,7 @@ class ComicListState extends State<ComicList> {
   }
 
   void storeState() {
-    if (enablePageStorage) {
+    if (enablePageStorage && mounted) {
       PageStorage.of(context).writeState(context, state);
     }
   }

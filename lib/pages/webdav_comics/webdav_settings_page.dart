@@ -541,6 +541,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
 
     try {
       final items = await _client!.readDir(_currentPath);
+      if (!mounted) return;
       final dirs = <_DirEntry>[];
       for (final item in items) {
         final name = item.name ?? '';
@@ -555,6 +556,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
