@@ -176,7 +176,7 @@ class StreamingZipReader {
     } catch (e) {
       // Some CDNs reject HEAD (e.g. 403) but allow ranged GETs; the
       // bytes=0-0 fallback below is authoritative.
-      Log.info("StreamingZip", "size HEAD failed, falling back to ranged GET: $e");
+      Log.info("StreamingZip", "size HEAD failed; falling back to ranged GET");
     }
 
     await _request(

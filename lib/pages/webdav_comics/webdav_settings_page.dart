@@ -509,6 +509,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
   bool _loading = true;
   String? _error;
   webdav.Client? _client;
+  int _loadRequestId = 0;
 
   @override
   void initState() {
@@ -534,14 +535,17 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
   }
 
   Future<void> _loadDir() async {
+    if (!mounted) return;
+    final path = _currentPath;
+    final requestId = ++_loadRequestId;
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
-      final items = await _client!.readDir(_currentPath);
-      if (!mounted) return;
+      final items = await _client!.readDir(path);
+      if (!mounted || requestId != _loadRequestId) return;
       final dirs = <_DirEntry>[];
       for (final item in items) {
         final name = item.name ?? '';
@@ -556,7 +560,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestId != _loadRequestId) return;
       setState(() {
         _error = e.toString();
         _loading = false;
