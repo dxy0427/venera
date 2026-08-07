@@ -119,7 +119,7 @@ void main() {
       accountId: 'test',
       client: client,
     );
-    final comic = WebDavResourceRef.comic('test', '/comic/').encode();
+    final comic = WebDavResourceRef.comic('test', '/force-refresh/').encode();
 
     expect(await provider.loadComicInfo(comic), isNull);
     final retried = await provider.loadComicInfo(comic);
@@ -142,6 +142,81 @@ void main() {
 
     expect(client.imageReadCount, 1);
   });
+
+  test('force refresh bypasses a cached info.json response', () async {
+    final client = _FakeWebDavComicClient()
+      ..imageResults.add(Uint8List.fromList(utf8.encode('{"title":"Old"}')))
+      ..imageResults.add(Uint8List.fromList(utf8.encode('{"title":"New"}')));
+    final provider = WebDavProvider.forTesting(
+      accountId: 'test',
+      client: client,
+    );
+    final comic = WebDavResourceRef.comic('test', '/comic/').encode();
+
+    expect((await provider.loadComicInfo(comic))?.title, 'Old');
+    expect(
+      (await provider.loadComicInfo(comic, forceRefresh: true))?.title,
+      'New',
+    );
+    expect(client.imageReadCount, 2);
+  });
+
+  test('force refresh keeps cached info after a transient failure', () async {
+    final client = _FakeWebDavComicClient()
+      ..imageResults.add(Uint8List.fromList(utf8.encode('{"title":"Cached"}')))
+      ..imageResults.addError(TimeoutException('temporary timeout'));
+    final provider = WebDavProvider.forTesting(
+      accountId: 'test',
+      client: client,
+    );
+    final comic = WebDavResourceRef.comic('test', '/cached-fallback/').encode();
+
+    expect((await provider.loadComicInfo(comic))?.title, 'Cached');
+    expect(
+      (await provider.loadComicInfo(comic, forceRefresh: true))?.title,
+      'Cached',
+    );
+    expect(client.imageReadCount, 2);
+  });
+
+  test('modified date ignores cover and metadata changes', () async {
+    final client = _FakeWebDavComicClient();
+    client.directoryResults['/comic/'] = Future.value([
+      webdav.File(name: 'cover.jpg', mTime: DateTime.utc(2026, 3, 1)),
+      webdav.File(name: 'info.json', mTime: DateTime.utc(2026, 2, 1)),
+      webdav.File(name: 'chapter.cbz', mTime: DateTime.utc(2026, 1, 1)),
+    ]);
+    final provider = WebDavProvider.forTesting(
+      accountId: 'test',
+      client: client,
+    );
+
+    expect(
+      await provider.loadModifiedDate('/comic/', forceRefresh: true),
+      '2026-01-01',
+    );
+    expect(client.forceRefreshCount, 1);
+  });
+
+  test(
+    'directory with only cover and metadata has no update fallback',
+    () async {
+      final client = _FakeWebDavComicClient();
+      client.directoryResults['/empty-comic/'] = Future.value([
+        webdav.File(name: 'cover.jpg', mTime: DateTime.utc(2026, 3, 1)),
+        webdav.File(name: 'info.json', mTime: DateTime.utc(2026, 2, 1)),
+      ]);
+      final provider = WebDavProvider.forTesting(
+        accountId: 'test',
+        client: client,
+      );
+
+      expect(
+        await provider.loadModifiedDate('/empty-comic/', forceRefresh: true),
+        isNull,
+      );
+    },
+  );
 }
 
 class _FakeWebDavComicClient extends WebDavComicClient {
@@ -159,9 +234,14 @@ class _FakeWebDavComicClient extends WebDavComicClient {
   final Map<String, Future<List<dynamic>>> directoryResults = {};
   final _QueuedResults<Uint8List> imageResults = _QueuedResults();
   int imageReadCount = 0;
+  int forceRefreshCount = 0;
 
   @override
-  Future<List<dynamic>> readDirectory(String path) async {
+  Future<List<dynamic>> readDirectory(
+    String path, {
+    bool forceRefresh = false,
+  }) async {
+    if (forceRefresh) forceRefreshCount++;
     return directoryResults[path] ?? const <dynamic>[];
   }
 

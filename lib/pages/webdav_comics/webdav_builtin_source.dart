@@ -178,6 +178,10 @@ class WebDavBuiltinSource {
           'Accounts': '账号',
           'Manage': '管理',
           'Author': '作者',
+          'Genre': '题材',
+          'Genres': '题材',
+          'Year': '年份',
+          'Language': '语言',
           '作者': '作者',
           '题材': '题材',
           '状态': '状态',
@@ -191,6 +195,10 @@ class WebDavBuiltinSource {
           'Accounts': '帳號',
           'Manage': '管理',
           'Author': '作者',
+          'Genre': '題材',
+          'Genres': '題材',
+          'Year': '年份',
+          'Language': '語言',
           '作者': '作者',
           '题材': '題材',
           '状态': '狀態',
@@ -204,6 +212,10 @@ class WebDavBuiltinSource {
           'Accounts': 'Accounts',
           'Manage': 'Manage',
           'Author': 'Author',
+          'Genre': 'Genre',
+          'Genres': 'Genres',
+          'Year': 'Year',
+          'Language': 'Language',
         },
       },
       null, // handleClickTagEvent
@@ -323,11 +335,9 @@ class WebDavBuiltinSource {
         if (info.title != null && info.title!.trim().isNotEmpty) {
           title = info.title!.trim();
         }
-        if (info.author != null && info.author!.trim().isNotEmpty) {
-          author = info.author!.trim();
-        }
-        // Flatten dynamic tags from info.json for list display/search
-        for (final entry in info.tags.entries) {
+        final detailTags = info.detailTags;
+        author = detailTags['Author']?.firstOrNull;
+        for (final entry in detailTags.entries) {
           for (final v in entry.value) {
             tags.add('${entry.key}:$v');
           }
@@ -358,11 +368,12 @@ class WebDavBuiltinSource {
       }
 
       final path = ref.remotePath;
-      final name = path.split('/').where((s) => s.isNotEmpty).last;
+      final rawName = path.split('/').where((s) => s.isNotEmpty).last;
       final isDirectory = path.endsWith('/');
+      final name = isDirectory ? rawName : provider.cleanName(rawName);
 
       final ComicInfo? info = isDirectory
-          ? await provider.loadComicInfo(id)
+          ? await provider.loadComicInfo(id, forceRefresh: true)
           : null;
 
       String cover = '';
@@ -387,7 +398,6 @@ class WebDavBuiltinSource {
       }
 
       ComicChapters? chapters;
-      int? maxPage;
       if (isDirectory) {
         final chapterList = await provider.getChapters(path);
         if (chapterList.isNotEmpty) {
@@ -397,46 +407,21 @@ class WebDavBuiltinSource {
                 c.name;
           }
           chapters = ComicChapters(map);
-        } else {
-          final images = await provider.getComicImages(id);
-          maxPage = images.length;
-        }
-      } else {
-        final images = await provider.getComicImages(id);
-        maxPage = images.length;
-      }
-
-      // Tags come only from info.json — do not invent fixed namespaces.
-      final tags = <String, List<String>>{};
-      if (info != null && info.tags.isNotEmpty) {
-        for (final e in info.tags.entries) {
-          if (e.value.isNotEmpty) {
-            tags[e.key] = List<String>.from(e.value);
-          }
         }
       }
 
-      // Author belongs in Information tags (like other sources), not subtitle.
-      final author = info?.author?.trim();
-      if (author != null && author.isNotEmpty) {
-        final hasAuthorNs = tags.keys.any(
-          (k) => const {
-            'author',
-            'authors',
-            'artist',
-            'artists',
-            '作者',
-            '画师',
-          }.contains(k.toLowerCase()),
-        );
-        if (!hasAuthorNs) {
-          tags['Author'] = [author];
-        }
-      }
+      final tags = info?.detailTags ?? <String, List<String>>{};
 
       final title = (info?.title?.trim().isNotEmpty == true)
           ? info!.title!.trim()
           : name;
+
+      // Update time: prefer info.json, fall back to remote mtime so that
+      // "follow updates" has something to compare.
+      var updateTime = info?.updateTime?.trim();
+      if (updateTime == null || updateTime.isEmpty) {
+        updateTime = await provider.loadModifiedDate(path, forceRefresh: true);
+      }
 
       final json = <String, dynamic>{
         'title': title,
@@ -447,8 +432,8 @@ class WebDavBuiltinSource {
         'sourceKey': key,
         'comicId': id,
         'stars': info?.stars,
-        'maxPage': maxPage,
-        'updateTime': null,
+        'maxPage': null,
+        'updateTime': (updateTime?.isEmpty ?? true) ? null : updateTime,
         'uploadTime': null,
       };
       return Res(ComicDetails.fromJson(json));

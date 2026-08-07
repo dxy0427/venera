@@ -474,6 +474,18 @@ class LocalManager with ChangeNotifier {
       );
     }
     var files = <File>[];
+    const imageExtensions = {
+      'jpg',
+      'jpeg',
+      'png',
+      'webp',
+      'gif',
+      'jpe',
+      'bmp',
+      'tiff',
+      'tif',
+      'avif',
+    };
     await for (var entity in directory.list()) {
       if (entity is File) {
         // Do not exclude comic.cover, since it may be the first page of the chapter.
@@ -483,6 +495,9 @@ class LocalManager with ChangeNotifier {
         }
         //Hidden file in some file system
         if (entity.name.startsWith('.')) {
+          continue;
+        }
+        if (!imageExtensions.contains(entity.extension.toLowerCase())) {
           continue;
         }
         files.add(entity);

@@ -61,6 +61,45 @@ Otherwise, the first image will be considered as the cover image.
 
 The name of directory will be used as comic title. And the name of chapter directory will be used as chapter title.
 
+**With Archive Chapters**
+
+```
+comic_directory
+├── cover.[ext]
+├── info.json
+├── chapter1.cbz
+├── chapter2.cbz
+├── final.cbz
+└── afterword.cbz
+```
+
+Each archive is imported as one chapter. Archive extensions are removed from
+chapter names, and nested image folders inside an archive are flattened in
+path-aware natural order. This format must be copied to the app local path so
+the chapter archives can be extracted. Do not mix chapter directories and
+chapter archives in the same comic directory.
+
+Optional `info.json` fields:
+
+```json
+{
+  "title": "Comic title",
+  "author": "Author A, Author B",
+  "description": "Description",
+  "cover": "cover.jpg",
+  "stars": 4.5,
+  "updateTime": "2026-08-07",
+  "tags": {
+    "Genre": ["Drama"],
+    "Year": ["2026"],
+    "Language": ["Chinese"]
+  }
+}
+```
+
+Local and WebDAV detail pages display only Author, Genre, Year and Language
+from metadata tags. Subtitle and Artist namespaces are ignored.
+
 ## Archive
 
 Venera supports importing comics from archive files.

@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:venera/pages/webdav_comics/comic_info.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
@@ -14,6 +17,8 @@ import 'cbz.dart';
 import 'io.dart';
 
 class ImportComic {
+  static const _coverBaseNames = {'cover', 'folder', 'thumb', '封面'};
+
   final String? selectedFolder;
   final bool copyToLocal;
 
@@ -263,10 +268,18 @@ class ImportComic {
     List<String>? tags,
     DateTime? createTime,
     bool useRelativePath = false,
+    bool checkDuplicate = true,
   }) async {
     if (!(await directory.exists())) return null;
-    var name = title ?? directory.name;
-    if (LocalManager().findByName(name) != null) {
+    final info = await ComicInfo.fromFile(
+      File(FilePath.join(directory.path, 'info.json')),
+    );
+    var name =
+        title ??
+        (info?.title?.trim().isNotEmpty == true
+            ? info!.title!.trim()
+            : directory.name);
+    if (checkDuplicate && LocalManager().findByName(name) != null) {
       Log.info("Import Comic", "Comic already exists: $name");
       return null;
     }
@@ -274,8 +287,10 @@ class ImportComic {
     var chapters = <String>[];
     var coverPath = ''; // relative path to the cover image
     var fileList = <String>[];
+    var archiveFiles = <File>[];
     await for (var entry in directory.list()) {
       if (entry is Directory) {
+        if (entry.name.startsWith('.') || entry.name == '__MACOSX') continue;
         hasChapters = true;
         chapters.add(entry.name);
         await for (var file in entry.list()) {
@@ -289,30 +304,76 @@ class ImportComic {
         }
       } else if (entry is File) {
         const imageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'];
-        if (imageExtensions.contains(entry.extension)) {
+        const archiveExtensions = ['cbz', 'zip', '7z', 'cb7'];
+        final extension = entry.extension.toLowerCase();
+        if (imageExtensions.contains(extension)) {
           fileList.add(entry.name);
+        } else if (archiveExtensions.contains(extension)) {
+          archiveFiles.add(entry);
         }
       }
     }
 
-    if (fileList.isEmpty) {
+    if (hasChapters && archiveFiles.isNotEmpty) {
+      throw Exception(
+        'Comic directories cannot mix chapter folders and archive chapters.',
+      );
+    }
+    if (archiveFiles.isNotEmpty) {
+      if (fileList.isEmpty) {
+        throw Exception(
+          'A cover image is required for archive chapter import.',
+        );
+      }
+      if (!copyToLocal) {
+        throw Exception(
+          'Archive chapter import requires copying to the app local path.',
+        );
+      }
+      return _importArchiveDirectory(
+        directory,
+        archiveFiles,
+        info: info,
+        title: name,
+        subtitle: subtitle,
+        tags: tags,
+        createTime: createTime,
+      );
+    }
+
+    if (fileList.isEmpty && !hasChapters) {
       return null;
     }
 
     fileList.sort(naturalCompare);
-    coverPath =
-        fileList.firstWhereOrNull((l) => l.startsWith('cover')) ??
-        fileList.first;
+    if (fileList.isNotEmpty) {
+      coverPath = fileList.firstWhereOrNull(_isCoverFileName) ?? fileList.first;
+    }
 
     chapters.sort(naturalCompare);
     if (hasChapters && coverPath == '') {
       // use the first image in the first chapter as the cover
-      var firstChapter = Directory('${directory.path}/${chapters.first}');
-      await for (var entry in firstChapter.list()) {
-        if (entry is File) {
-          coverPath = entry.name;
-          break;
-        }
+      final firstChapter = Directory(
+        FilePath.join(directory.path, chapters.first),
+      );
+      final images =
+          firstChapter
+              .listSync()
+              .whereType<File>()
+              .where(
+                (file) => const {
+                  'jpg',
+                  'jpeg',
+                  'png',
+                  'webp',
+                  'gif',
+                  'jpe',
+                }.contains(file.extension.toLowerCase()),
+              )
+              .toList()
+            ..sort((a, b) => naturalCompare(a.name, b.name));
+      if (images.isNotEmpty) {
+        coverPath = FilePath.join(chapters.first, images.first.name);
       }
     }
     if (coverPath == '') {
@@ -323,8 +384,8 @@ class ImportComic {
     return LocalComic(
       id: id ?? '0',
       title: name,
-      subtitle: subtitle ?? '',
-      tags: tags ?? [],
+      subtitle: subtitle ?? _infoAuthor(info),
+      tags: tags ?? _legacyTags(info),
       directory: directoryPath,
       chapters: hasChapters
           ? ComicChapters(Map.fromIterables(chapters, chapters))
@@ -334,6 +395,169 @@ class ImportComic {
       downloadedChapters: chapters,
       createdAt: createTime ?? DateTime.now(),
     );
+  }
+
+  @visibleForTesting
+  Future<LocalComic?> checkSingleComicForTesting(Directory directory) {
+    return _checkSingleComic(directory, checkDuplicate: false);
+  }
+
+  static String _infoAuthor(ComicInfo? info) =>
+      info?.detailTags['Author']?.join(', ') ?? '';
+
+  Future<LocalComic> _importArchiveDirectory(
+    Directory source,
+    List<File> archives, {
+    required ComicInfo? info,
+    required String title,
+    String? subtitle,
+    List<String>? tags,
+    DateTime? createTime,
+  }) async {
+    archives.sort((a, b) => naturalCompare(a.name, b.name));
+    final destinationName = findValidDirectoryName(LocalManager().path, title);
+    final destination = Directory(
+      FilePath.join(LocalManager().path, destinationName),
+    );
+    final extractDir = Directory(
+      FilePath.join(App.cachePath, 'archive_chapter_import'),
+    );
+    await destination.create(recursive: true);
+
+    try {
+      final cover = _findCoverFile(source, info?.cover);
+      if (cover == null) {
+        throw Exception('No cover image found.');
+      }
+      final coverName = 'cover.${cover.extension.toLowerCase()}';
+      await cover.copyMem(FilePath.join(destination.path, coverName));
+
+      final sourceInfo = File(FilePath.join(source.path, 'info.json'));
+      if (await sourceInfo.exists()) {
+        final destinationInfo = File(
+          FilePath.join(destination.path, 'info.json'),
+        );
+        final json = Map<String, dynamic>.from(
+          jsonDecode(await sourceInfo.readAsString()) as Map,
+        );
+        json['cover'] = coverName;
+        await destinationInfo.writeAsString(jsonEncode(json));
+      }
+
+      final chapterMap = <String, String>{};
+      for (var index = 0; index < archives.length; index++) {
+        await extractDir.deleteIgnoreError(recursive: true);
+        await extractDir.create(recursive: true);
+        File archive = archives[index];
+        File? temporaryArchive;
+        if (App.isAndroid) {
+          temporaryArchive = File(
+            FilePath.join(
+              App.cachePath,
+              'archive_chapter.${archive.extension.toLowerCase()}',
+            ),
+          );
+          await archive.copyMem(temporaryArchive.path);
+          archive = temporaryArchive;
+        }
+        try {
+          await CBZ.extractArchive(archive, extractDir);
+        } finally {
+          await temporaryArchive?.deleteIgnoreError();
+        }
+        final images = CBZ.collectImages(extractDir).where((file) {
+          final base = file.basenameWithoutExt.toLowerCase();
+          return !_coverBaseNames.contains(base);
+        }).toList();
+        if (images.isEmpty) {
+          throw Exception('No images found in ${archives[index].name}');
+        }
+
+        final chapterId = index.toString();
+        final chapterDir = Directory(
+          FilePath.join(destination.path, chapterId),
+        );
+        await chapterDir.create();
+        for (var page = 0; page < images.length; page++) {
+          final image = images[page];
+          await image.copyMem(
+            FilePath.join(
+              chapterDir.path,
+              '${(page + 1).toString().padLeft(4, '0')}.${image.extension.toLowerCase()}',
+            ),
+          );
+        }
+        chapterMap[chapterId] = _archiveDisplayName(archives[index].name);
+      }
+
+      return LocalComic(
+        id: '0',
+        title: title,
+        subtitle: subtitle ?? _infoAuthor(info),
+        tags: tags ?? _legacyTags(info),
+        directory: destinationName,
+        chapters: ComicChapters(chapterMap),
+        cover: coverName,
+        comicType: ComicType.local,
+        downloadedChapters: chapterMap.keys.toList(),
+        createdAt: createTime ?? DateTime.now(),
+      );
+    } catch (_) {
+      await destination.deleteIgnoreError(recursive: true);
+      rethrow;
+    } finally {
+      await extractDir.deleteIgnoreError(recursive: true);
+    }
+  }
+
+  static File? _findCoverFile(Directory directory, String? configuredCover) {
+    if (configuredCover != null && configuredCover.trim().isNotEmpty) {
+      final value = configuredCover.trim();
+      if (!value.startsWith('http://') &&
+          !value.startsWith('https://') &&
+          !value.startsWith('file://')) {
+        final file = File(
+          FilePath.join(
+            directory.path,
+            value.startsWith('/') ? value.substring(1) : value,
+          ),
+        );
+        if (file.existsSync()) return file;
+      }
+    }
+    const imageExtensions = {'jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'};
+    final images =
+        directory
+            .listSync()
+            .whereType<File>()
+            .where(
+              (file) => imageExtensions.contains(file.extension.toLowerCase()),
+            )
+            .toList()
+          ..sort((a, b) => naturalCompare(a.name, b.name));
+    return images.firstWhereOrNull(
+          (file) =>
+              _coverBaseNames.contains(file.basenameWithoutExt.toLowerCase()),
+        ) ??
+        images.firstOrNull;
+  }
+
+  static bool _isCoverFileName(String name) {
+    final dot = name.lastIndexOf('.');
+    final base = (dot > 0 ? name.substring(0, dot) : name).toLowerCase();
+    return _coverBaseNames.contains(base);
+  }
+
+  static String _archiveDisplayName(String name) {
+    final dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) : name;
+  }
+
+  static List<String> _legacyTags(ComicInfo? info) {
+    if (info == null) return const [];
+    return info.detailTags.entries
+        .expand((entry) => entry.value.map((value) => '${entry.key}:$value'))
+        .toList();
   }
 
   static Future<Map<String, String>> _copyDirectories(
@@ -369,14 +593,22 @@ class ImportComic {
     Map<String?, List<LocalComic>> comics,
   ) async {
     var destPath = LocalManager().path;
+    final normalizedDest = destPath
+        .replaceAll('\\', '/')
+        .replaceAll(RegExp(r'/+$'), '');
+    bool isManaged(LocalComic comic) {
+      final base = comic.baseDir
+          .replaceAll('\\', '/')
+          .replaceAll(RegExp(r'/+$'), '');
+      return base == normalizedDest || base.startsWith('$normalizedDest/');
+    }
+
     Map<String?, List<LocalComic>> result = {};
     for (var favoriteFolder in comics.keys) {
       result[favoriteFolder] = comics[favoriteFolder]!
-          .where((c) => c.directory.startsWith(destPath))
+          .where(isManaged)
           .toList();
-      comics[favoriteFolder]!.removeWhere(
-        (c) => c.directory.startsWith(destPath),
-      );
+      comics[favoriteFolder]!.removeWhere(isManaged);
 
       if (comics[favoriteFolder]!.isEmpty) {
         continue;
@@ -384,15 +616,16 @@ class ImportComic {
 
       try {
         // copy the comics to the local directory
-        var pathMap = await compute<Map<String, dynamic>, Map<String, String>>(
-          _copyDirectories,
-          {
-            'toBeCopied': comics[favoriteFolder]!
-                .map((e) => e.directory)
-                .toList(),
-            'destination': destPath,
-          },
-        );
+        final pathMap =
+            await compute<Map<String, dynamic>, Map<String, String>>(
+              _copyDirectories,
+              {
+                'toBeCopied': comics[favoriteFolder]!
+                    .map((e) => e.directory)
+                    .toList(),
+                'destination': destPath,
+              },
+            );
         //Construct a new object since LocalComic.directory is a final String
         for (var c in comics[favoriteFolder]!) {
           result[favoriteFolder]!.add(

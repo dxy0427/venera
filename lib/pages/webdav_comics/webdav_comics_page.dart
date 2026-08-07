@@ -54,6 +54,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
 
   /// Display titles from info.json (path -> title).
   final Map<String, String> _infoTitles = {};
+  final Set<String> _refreshInfoPaths = {};
   String? _infoAccountId;
 
   /// Current browsing path (null = root).
@@ -102,6 +103,23 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       _currentPath = null;
     });
     _provider.loadComics(forceRefresh: true);
+  }
+
+  Future<void> _refresh() async {
+    if (_currentPath != null) {
+      await _provider.loadDirectory(_currentPath!, forceRefresh: true);
+    } else {
+      await _provider.refresh();
+    }
+    if (!mounted) return;
+    setState(() {
+      _refreshInfoPaths.addAll(
+        _currentComics
+            .where((comic) => comic.isDirectory && !comic.isCategory)
+            .map((comic) => comic.path),
+      );
+      _infoTitles.clear();
+    });
   }
 
   @override
@@ -159,13 +177,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
               ),
               IconButton(
                 icon: const Icon(Icons.refresh),
-                onPressed: () {
-                  if (_currentPath != null) {
-                    _provider.loadDirectory(_currentPath!);
-                  } else {
-                    _provider.refresh();
-                  }
-                },
+                onPressed: _refresh,
                 tooltip: 'Refresh'.tl,
               ),
               IconButton(
@@ -283,8 +295,10 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
       await Future.wait(
         batch.map((c) async {
           try {
+            final forceRefresh = _refreshInfoPaths.remove(c.path);
             final info = await _provider.loadComicInfo(
               WebDavResourceRef.comic(widget.accountId, c.path).encode(),
+              forceRefresh: forceRefresh,
             );
             final t = info?.title?.trim();
             _infoTitles[_titleKey(c.path)] = (t != null && t.isNotEmpty)

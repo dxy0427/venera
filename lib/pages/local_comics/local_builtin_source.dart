@@ -41,9 +41,30 @@ class LocalBuiltinSource {
       null,
       null,
       {
-        'zh_CN': {'Local': '本地', 'Author': '作者'},
-        'zh_TW': {'Local': '本地', 'Author': '作者'},
-        'en_US': {'Local': 'Local', 'Author': 'Author'},
+        'zh_CN': {
+          'Local': '本地',
+          'Author': '作者',
+          'Genre': '题材',
+          'Genres': '题材',
+          'Year': '年份',
+          'Language': '语言',
+        },
+        'zh_TW': {
+          'Local': '本地',
+          'Author': '作者',
+          'Genre': '題材',
+          'Genres': '題材',
+          'Year': '年份',
+          'Language': '語言',
+        },
+        'en_US': {
+          'Local': 'Local',
+          'Author': 'Author',
+          'Genre': 'Genre',
+          'Genres': 'Genres',
+          'Year': 'Year',
+          'Language': 'Language',
+        },
       },
       null,
       null,
@@ -68,41 +89,23 @@ class LocalBuiltinSource {
         info = await ComicInfo.fromFile(infoFile);
       }
 
-      final tags = <String, List<String>>{};
-      if (info != null && info.tags.isNotEmpty) {
-        for (final e in info.tags.entries) {
-          if (e.value.isNotEmpty) {
-            tags[e.key] = List<String>.from(e.value);
-          }
-        }
-      } else {
-        for (final t in localComic.tags) {
-          final i = t.indexOf(':');
-          if (i > 0) {
-            final ns = t.substring(0, i);
-            final v = t.substring(i + 1);
-            tags.putIfAbsent(ns, () => []).add(v);
-          } else if (t.isNotEmpty) {
-            tags.putIfAbsent('tag', () => []).add(t);
-          }
-        }
+      final storedTags = <String, List<String>>{};
+      for (final tag in localComic.tags) {
+        final separator = tag.indexOf(':');
+        if (separator <= 0) continue;
+        final namespace = tag.substring(0, separator);
+        final value = tag.substring(separator + 1);
+        storedTags.putIfAbsent(namespace, () => []).add(value);
       }
-
-      final author = info?.author?.trim();
-      if (author != null && author.isNotEmpty) {
-        final hasAuthorNs = tags.keys.any(
-          (k) => const {
-            'author',
-            'authors',
-            'artist',
-            'artists',
-            '作者',
-            '画师',
-          }.contains(k.toLowerCase()),
-        );
-        if (!hasAuthorNs) {
-          tags['Author'] = [author];
-        }
+      final storedDetailTags = ComicInfo(
+        author: localComic.subtitle,
+        tags: storedTags,
+      ).detailTags;
+      final infoDetailTags = info?.detailTags ?? const <String, List<String>>{};
+      final tags = <String, List<String>>{};
+      for (final namespace in const ['Author', 'Genre', 'Year', 'Language']) {
+        final values = infoDetailTags[namespace] ?? storedDetailTags[namespace];
+        if (values != null && values.isNotEmpty) tags[namespace] = values;
       }
 
       final title = (info?.title?.trim().isNotEmpty == true)
@@ -123,6 +126,12 @@ class LocalBuiltinSource {
         }
       }
 
+      var updateTime = info?.updateTime?.trim();
+      if (updateTime == null || updateTime.isEmpty) {
+        final modified = await _latestModifiedDate(localComic.baseDir);
+        updateTime = modified;
+      }
+
       final json = <String, dynamic>{
         'title': title,
         'subtitle': null,
@@ -134,12 +143,61 @@ class LocalBuiltinSource {
         'comicId': id,
         'stars': info?.stars,
         'maxPage': null,
-        'updateTime': null,
+        'updateTime': (updateTime?.isEmpty ?? true) ? null : updateTime,
         'uploadTime': null,
       };
       return Res(ComicDetails.fromJson(json));
     } catch (e) {
       return Res.error(e.toString());
+    }
+  }
+
+  /// Latest modification date inside the comic directory, `YYYY-MM-DD`.
+  static Future<String?> _latestModifiedDate(String baseDir) async {
+    try {
+      final dir = Directory(baseDir);
+      if (!await dir.exists()) return null;
+      DateTime? latest;
+      await for (final entity in dir.list()) {
+        if (entity is File) {
+          final extension = entity.extension.toLowerCase();
+          if (!const {
+            'jpg',
+            'jpeg',
+            'png',
+            'webp',
+            'gif',
+            'jpe',
+            'bmp',
+            'tiff',
+            'tif',
+            'avif',
+            'cbz',
+            'zip',
+            '7z',
+            'cb7',
+          }.contains(extension)) {
+            continue;
+          }
+          final lower = entity.name.toLowerCase();
+          if (lower.startsWith('cover.') ||
+              lower.startsWith('folder.') ||
+              lower.startsWith('thumb.') ||
+              lower.startsWith('封面.')) {
+            continue;
+          }
+        }
+        final stat = await entity.stat();
+        final modified = stat.modified;
+        if (latest == null || modified.isAfter(latest)) latest = modified;
+      }
+      if (latest == null) return null;
+      final local = latest.toLocal();
+      final month = local.month.toString().padLeft(2, '0');
+      final day = local.day.toString().padLeft(2, '0');
+      return '${local.year}-$month-$day';
+    } catch (_) {
+      return null;
     }
   }
 

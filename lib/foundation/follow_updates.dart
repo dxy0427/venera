@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/foundation/comic_type.dart';
+import 'package:venera/pages/local_comics/local_builtin_source.dart';
 import 'package:venera/utils/channel.dart';
 
 class ComicUpdateResult {
@@ -18,35 +20,46 @@ Future<ComicUpdateResult> updateComic(
   int retries = 3;
   while (true) {
     try {
-      var comicSource = c.type.comicSource;
+      var comicSource = c.type == ComicType.local
+          ? LocalBuiltinSource.source
+          : c.type.comicSource;
       if (comicSource == null) {
         return ComicUpdateResult(false, "Comic source not found");
       }
       var newInfo = (await comicSource.loadComicInfo!(c.id)).data;
 
-      var newTags = <String>[];
-      for (var entry in newInfo.tags.entries) {
-        const shouldIgnore = ['author', 'artist', 'time'];
-        var namespace = entry.key;
-        if (shouldIgnore.contains(namespace.toLowerCase())) {
-          continue;
+      if (c.type != ComicType.local) {
+        var newTags = <String>[];
+        for (var entry in newInfo.tags.entries) {
+          const shouldIgnore = [
+            'author',
+            'authors',
+            'artist',
+            'artists',
+            '作者',
+            '画师',
+            '畫師',
+            'time',
+          ];
+          var namespace = entry.key;
+          if (shouldIgnore.contains(namespace.toLowerCase())) continue;
+          for (var tag in entry.value) {
+            newTags.add("$namespace:$tag");
+          }
         }
-        for (var tag in entry.value) {
-          newTags.add("$namespace:$tag");
-        }
+        LocalFavoritesManager().updateInfo(
+          folder,
+          FavoriteItem(
+            id: c.id,
+            name: newInfo.title,
+            coverPath: newInfo.cover,
+            author: newInfo.findAuthor() ?? newInfo.subTitle ?? c.author,
+            type: c.type,
+            tags: newTags,
+          ),
+          false,
+        );
       }
-
-      var item = FavoriteItem(
-        id: c.id,
-        name: newInfo.title,
-        coverPath: newInfo.cover,
-        author:
-            newInfo.subTitle ?? newInfo.tags['author']?.firstOrNull ?? c.author,
-        type: c.type,
-        tags: newTags,
-      );
-
-      LocalFavoritesManager().updateInfo(folder, item, false);
 
       var updated = false;
       var updateTime = newInfo.findUpdateTime();

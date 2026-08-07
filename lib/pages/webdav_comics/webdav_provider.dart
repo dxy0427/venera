@@ -267,11 +267,98 @@ class WebDavProvider with ChangeNotifier {
         _rememberArchiveSize(f.path, f.size);
       }
       return cbzFiles
-          .map((f) => WebDavChapter(name: f.name, path: f.path, imageCount: 0))
+          .map(
+            (f) => WebDavChapter(
+              // Display without the .cbz/.zip extension; path keeps it.
+              name: _client.cleanName(f.name),
+              path: f.path,
+              imageCount: 0,
+            ),
+          )
           .toList();
     }
     return [];
   }
+
+  /// Latest remote modification date for a comic, formatted as `YYYY-MM-DD`.
+  ///
+  /// Used as the update-time fallback when `info.json` does not provide one,
+  /// so follow-updates can detect new chapters.
+  Future<String?> loadModifiedDate(
+    String remotePath, {
+    bool forceRefresh = false,
+  }) async {
+    _requireAccount();
+    try {
+      DateTime? latest;
+      if (remotePath.endsWith('/')) {
+        final items = await _client.readDirectory(
+          remotePath,
+          forceRefresh: forceRefresh,
+        );
+        for (final item in items) {
+          final name = item.name ?? '';
+          if (name.isEmpty || name == '.') continue;
+          final ext = _client.getExtension(name).toLowerCase();
+          final isContent =
+              item.isDir == true ||
+              _client.isImage(ext) ||
+              _client.isArchive(ext);
+          if (!isContent || _isCoverName(name)) continue;
+          final modified = item.mTime;
+          if (modified == null) continue;
+          if (latest == null || modified.isAfter(latest)) latest = modified;
+        }
+      }
+      if (latest == null && !remotePath.endsWith('/')) {
+        final parent = _parentDirectory(remotePath);
+        final target = remotePath.endsWith('/')
+            ? remotePath.substring(0, remotePath.length - 1)
+            : remotePath;
+        final targetName = target
+            .split('/')
+            .where((part) => part.isNotEmpty)
+            .last;
+        final items = await _client.readDirectory(
+          parent,
+          forceRefresh: forceRefresh,
+        );
+        for (final item in items) {
+          final path = (item.path ?? '').replaceAll(RegExp(r'/+$'), '');
+          final name = item.name ?? '';
+          if ((path.isEmpty || path != target) && name != targetName) continue;
+          latest = item.mTime;
+          break;
+        }
+      }
+      if (latest == null) return null;
+      final local = latest.toLocal();
+      final month = local.month.toString().padLeft(2, '0');
+      final day = local.day.toString().padLeft(2, '0');
+      return '${local.year}-$month-$day';
+    } catch (e) {
+      Log.info("WebDavProvider", "Failed to read modified time: $e");
+      return null;
+    }
+  }
+
+  static String _parentDirectory(String remotePath) {
+    var path = remotePath;
+    if (path.endsWith('/')) path = path.substring(0, path.length - 1);
+    final index = path.lastIndexOf('/');
+    if (index <= 0) return '/';
+    return path.substring(0, index + 1);
+  }
+
+  static bool _isCoverName(String name) {
+    final lower = name.toLowerCase();
+    return lower.startsWith('cover.') ||
+        lower.startsWith('folder.') ||
+        lower.startsWith('thumb.') ||
+        lower.startsWith('封面.');
+  }
+
+  String cleanName(String name) => _client.cleanName(name);
 
   /// Get images for a specific chapter.
   Future<List<String>> getChapterImages(String chapterPath) async {
@@ -369,7 +456,8 @@ class WebDavProvider with ChangeNotifier {
           '.tif',
         }.contains(ext);
       }).toList();
-      imageEntries.sort((a, b) => naturalCompare(a.fileName, b.fileName));
+      // Group by folder so multi-directory archives read folder by folder.
+      imageEntries.sort((a, b) => naturalComparePath(a.fileName, b.fileName));
       if (imageEntries.isEmpty) {
         throw Exception('No images in CBZ');
       }
@@ -581,7 +669,7 @@ class WebDavProvider with ChangeNotifier {
   int _contentRequestId = 0;
 
   /// Load contents of a specific directory for browsing.
-  Future<void> loadDirectory(String path) async {
+  Future<void> loadDirectory(String path, {bool forceRefresh = false}) async {
     _requireAccount();
     final requestId = ++_contentRequestId;
     final client = _client;
@@ -590,6 +678,7 @@ class WebDavProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      if (forceRefresh) client.clearDirectoryCache();
       final items = await client.readDirectory(path);
       if (!_isCurrentContentRequest(requestId)) return;
       final entries = <WebDavComicEntry>[];
@@ -694,7 +783,10 @@ class WebDavProvider with ChangeNotifier {
   }
 
   /// Load info.json from a comic directory (with caching).
-  Future<ComicInfo?> loadComicInfo(String comicPath) async {
+  Future<ComicInfo?> loadComicInfo(
+    String comicPath, {
+    bool forceRefresh = false,
+  }) async {
     _requireAccount();
     final ref = WebDavResourceRef.parse(comicPath);
     _checkAccount(ref);
@@ -703,10 +795,23 @@ class WebDavProvider with ChangeNotifier {
     }
     comicPath = ref.remotePath;
     final cacheKey = _cacheKey('webdav_info_v2', comicPath);
+    Uint8List? cachedData;
+    if (forceRefresh) {
+      final pending = _comicInfoRequests[cacheKey];
+      if (pending != null) await pending;
+      _missingComicInfo.remove(cacheKey);
+      final cached = await CacheManager().findCache(cacheKey);
+      if (cached != null) cachedData = await cached.readAsBytes();
+    }
     if (_missingComicInfo.contains(cacheKey)) return null;
     final pending = _comicInfoRequests[cacheKey];
     if (pending != null) return pending;
-    final request = _loadComicInfo(cacheKey, comicPath);
+    final request = _loadComicInfo(
+      cacheKey,
+      comicPath,
+      useCache: !forceRefresh,
+      fallbackData: cachedData,
+    );
     _comicInfoRequests[cacheKey] = request;
     try {
       return await request;
@@ -717,19 +822,18 @@ class WebDavProvider with ChangeNotifier {
     }
   }
 
-  Future<ComicInfo?> _loadComicInfo(String cacheKey, String comicPath) async {
+  Future<ComicInfo?> _loadComicInfo(
+    String cacheKey,
+    String comicPath, {
+    required bool useCache,
+    Uint8List? fallbackData,
+  }) async {
     // Check cache first
-    final cached = await CacheManager().findCache(cacheKey);
+    final cached = useCache ? await CacheManager().findCache(cacheKey) : null;
     if (cached != null) {
       try {
         final bytes = await cached.readAsBytes();
-        final content = utf8
-            .decode(bytes, allowMalformed: true)
-            .replaceFirst('\uFEFF', '');
-        final json = Map<String, dynamic>.from(
-          const JsonDecoder().convert(content) as Map,
-        );
-        return ComicInfo.fromJson(json);
+        return _decodeComicInfo(bytes);
       } catch (_) {
         await CacheManager().delete(cacheKey);
       }
@@ -740,23 +844,40 @@ class WebDavProvider with ChangeNotifier {
       final infoPath = '${comicPath}info.json';
       data = await _client.readImage(infoPath);
     } catch (e) {
-      if (_isNotFound(e)) _missingComicInfo.add(cacheKey);
-      return null;
+      if (_isNotFound(e)) {
+        _missingComicInfo.add(cacheKey);
+        await CacheManager().delete(cacheKey);
+        return null;
+      }
+      return _decodeComicInfoOrNull(fallbackData);
     }
 
     try {
-      final content = utf8
-          .decode(data, allowMalformed: true)
-          .replaceFirst('\uFEFF', '');
-      final json = Map<String, dynamic>.from(
-        const JsonDecoder().convert(content) as Map,
-      );
-      final info = ComicInfo.fromJson(json);
+      final info = _decodeComicInfo(data);
       await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
       return info;
     } catch (_) {
+      return _decodeComicInfoOrNull(fallbackData);
+    }
+  }
+
+  static ComicInfo? _decodeComicInfoOrNull(Uint8List? data) {
+    if (data == null) return null;
+    try {
+      return _decodeComicInfo(data);
+    } catch (_) {
       return null;
     }
+  }
+
+  static ComicInfo _decodeComicInfo(Uint8List data) {
+    final content = utf8
+        .decode(data, allowMalformed: true)
+        .replaceFirst('\uFEFF', '');
+    final json = Map<String, dynamic>.from(
+      const JsonDecoder().convert(content) as Map,
+    );
+    return ComicInfo.fromJson(json);
   }
 
   bool _isNotFound(Object error) {

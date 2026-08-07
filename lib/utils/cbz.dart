@@ -81,6 +81,7 @@ class VolumeExportResult {
 /// Image extensions accepted when packing a CBZ. Mirrors the filter used by
 /// [CBZ.import]. Lower-cased, without the leading dot.
 const _cbzImageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'];
+const _cbzCoverBaseNames = {'cover', 'folder', 'thumb', '封面'};
 
 /// Comic Book Archive. Currently supports CBZ, ZIP and 7Z formats.
 abstract class CBZ {
@@ -93,7 +94,11 @@ abstract class CBZ {
     return detectFileType(header);
   }
 
-  static Future<void> extractArchive(File file, Directory out) async {
+  static Future<void> extractArchive(File file, Directory out) {
+    return extractor(file, out);
+  }
+
+  static Future<void> _defaultExtractor(File file, Directory out) async {
     var fileType = await checkType(file);
     if (fileType.mime == 'application/zip') {
       await ZipFile.openAndExtractAsync(file.path, out.path, 4);
@@ -102,6 +107,33 @@ abstract class CBZ {
     } else {
       throw Exception('Unsupported archive type');
     }
+  }
+
+  /// Archive extraction hook, overridable by tests that cannot load the native
+  /// ZIP library.
+  static Future<void> Function(File file, Directory out) extractor =
+      _defaultExtractor;
+
+  /// Recursively collect archive images in path-aware natural order.
+  static List<File> collectImages(Directory directory) {
+    final files = directory
+        .listSync(recursive: true, followLinks: false)
+        .whereType<File>()
+        .where(
+          (file) => _cbzImageExtensions.contains(file.extension.toLowerCase()),
+        )
+        .toList();
+    String relativePath(File file) {
+      final prefix = directory.path.endsWith(Platform.pathSeparator)
+          ? directory.path
+          : '${directory.path}${Platform.pathSeparator}';
+      return file.path
+          .replaceFirst(prefix, '')
+          .replaceAll(Platform.pathSeparator, '/');
+    }
+
+    files.sort((a, b) => naturalComparePath(relativePath(a), relativePath(b)));
+    return files;
   }
 
   static Future<LocalComic> import(File file) async {
@@ -133,21 +165,14 @@ abstract class CBZ {
     if (old != null) {
       throw Exception('Comic with name ${metaData.title} already exists');
     }
-    var files = cache.listSync().whereType<File>().toList();
-    files.removeWhere((e) {
-      var ext = e.path.split('.').last.toLowerCase();
-      return !_cbzImageExtensions.contains(ext);
-    });
+    var files = collectImages(cache);
     if (files.isEmpty) {
       cache.deleteSync(recursive: true);
       throw Exception('No images found in the archive');
     }
-    files.sort(
-      (a, b) => naturalCompare(a.basenameWithoutExt, b.basenameWithoutExt),
-    );
     var coverFile = files.firstWhereOrNull(
       (element) =>
-          element.path.endsWith('cover.${element.path.split('.').last}'),
+          _cbzCoverBaseNames.contains(element.basenameWithoutExt.toLowerCase()),
     );
     if (coverFile != null) {
       files.remove(coverFile);
@@ -162,7 +187,9 @@ abstract class CBZ {
       ),
     );
     dest.createSync();
-    coverFile.copyMem(FilePath.join(dest.path, 'cover.${coverFile.extension}'));
+    await coverFile.copyMem(
+      FilePath.join(dest.path, 'cover.${coverFile.extension}'),
+    );
     if (metaData.chapters == null) {
       for (var i = 0; i < files.length; i++) {
         var src = files[i];

@@ -83,8 +83,8 @@ class FavoriteItem implements Comic {
     final sourceName = type == ComicType.local
         ? 'local'
         : type == ComicType.webdav
-            ? 'WebDAV'.tl
-            : type.comicSource?.name ?? "Unknown";
+        ? 'WebDAV'.tl
+        : type.comicSource?.name ?? "Unknown";
     return appdata.settings['comicDisplayMode'] == 'detailed'
         ? "$time | $sourceName"
         : "$sourceName | $time";
@@ -196,7 +196,11 @@ class FavoriteItemWithUpdateInfo extends FavoriteItem {
   @override
   String get description {
     var updateTime = this.updateTime ?? "Unknown";
-    var sourceName = type.comicSource?.name ?? "Unknown";
+    final sourceName = type == ComicType.local
+        ? 'local'
+        : type == ComicType.webdav
+        ? 'WebDAV'.tl
+        : type.comicSource?.name ?? "Unknown";
     return "$updateTime | $sourceName";
   }
 

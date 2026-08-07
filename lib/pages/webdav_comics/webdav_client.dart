@@ -88,7 +88,13 @@ class WebDavComicClient {
     _coverPathCache.clear();
   }
 
-  Future<List<dynamic>> readDirectory(String path) => _readDir(path);
+  Future<List<dynamic>> readDirectory(
+    String path, {
+    bool forceRefresh = false,
+  }) {
+    if (forceRefresh) _directoryCache.remove(path);
+    return _readDir(path);
+  }
 
   List<String>? getConfig() {
     return account.isValid ? account.configTriple : null;
