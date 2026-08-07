@@ -402,8 +402,7 @@ class ImportComic {
     return _checkSingleComic(directory, checkDuplicate: false);
   }
 
-  static String _infoAuthor(ComicInfo? info) =>
-      info?.detailTags['Author']?.join(', ') ?? '';
+  static String _infoAuthor(ComicInfo? info) => info?.author?.trim() ?? '';
 
   Future<LocalComic> _importArchiveDirectory(
     Directory source,
@@ -555,9 +554,16 @@ class ImportComic {
 
   static List<String> _legacyTags(ComicInfo? info) {
     if (info == null) return const [];
-    return info.detailTags.entries
-        .expand((entry) => entry.value.map((value) => '${entry.key}:$value'))
-        .toList();
+    final tags = <String>[];
+    for (final author in info.authors) {
+      tags.add('Author:$author');
+    }
+    tags.addAll(
+      info.detailTags.entries
+          .expand((entry) => entry.value.map((value) => '${entry.key}:$value'))
+          .toList(),
+    );
+    return tags;
   }
 
   static Future<Map<String, String>> _copyDirectories(

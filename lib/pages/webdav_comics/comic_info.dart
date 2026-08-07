@@ -7,27 +7,19 @@ import 'dart:io';
 /// ```json
 /// {
 ///   "title": "漫画名",
-///   "author": "作者A, 作者B",
+///   "author": "作者",
 ///   "description": "简介",
 ///   "tags": {
-///     "题材": ["后宫", "穿越"],
-///     "年份": ["2024"],
+///     "题材": ["题材1", "题材2"],
+///     "状态": ["连载中"],
+///     "年份": ["2025"],
 ///     "语言": ["中文"]
 ///   },
 ///   "cover": "cover.jpg",
-///   "stars": 4.5,
-///   "updateTime": "2024-05-01"
+///   "stars": 8.7
 /// }
 /// ```
 class ComicInfo {
-  static const _authorNamespaces = {'author', 'authors', '作者'};
-
-  static const _genreNamespaces = {'genre', 'genres', '题材', '題材'};
-
-  static const _yearNamespaces = {'year', '年份'};
-
-  static const _languageNamespaces = {'language', 'languages', '语言', '語言'};
-
   final String? title;
   final String? author;
   final String? description;
@@ -46,8 +38,7 @@ class ComicInfo {
     this.updateTime,
   });
 
-  /// Authors split on common separators, so multiple authors become
-  /// individual tags instead of a single long value.
+  /// Authors split on common separators when individual values are needed.
   List<String> get authors {
     final raw = author?.trim();
     if (raw == null || raw.isEmpty) return const [];
@@ -58,36 +49,18 @@ class ComicInfo {
         .toList();
   }
 
-  /// Information namespaces displayed by the built-in local and WebDAV
-  /// sources. Their detail pages intentionally mirror online sources that
-  /// expose author rather than a separate artist/subtitle row.
+  /// Tags preserve the order and names from `info.json`.
   Map<String, List<String>> get detailTags {
     final result = <String, List<String>>{};
-
-    List<String> collect(Iterable<String> namespaces) {
-      final values = <String>[];
-      for (final entry in tags.entries) {
-        final namespace = entry.key.trim().toLowerCase();
-        if (!namespaces.contains(namespace)) continue;
-        values.addAll(entry.value);
-      }
-      return values
+    for (final entry in tags.entries) {
+      final key = entry.key.trim();
+      if (key.isEmpty) continue;
+      final values = entry.value
           .map((value) => value.trim())
           .where((value) => value.isNotEmpty)
-          .toSet()
-          .toList();
+          .toList(growable: false);
+      if (values.isNotEmpty) result[key] = values;
     }
-
-    final authorValues = <String>{...authors, ...collect(_authorNamespaces)};
-    if (authorValues.isNotEmpty) {
-      result['Author'] = authorValues.toList();
-    }
-    final genreValues = collect(_genreNamespaces);
-    if (genreValues.isNotEmpty) result['Genre'] = genreValues;
-    final yearValues = collect(_yearNamespaces);
-    if (yearValues.isNotEmpty) result['Year'] = yearValues;
-    final languageValues = collect(_languageNamespaces);
-    if (languageValues.isNotEmpty) result['Language'] = languageValues;
     return result;
   }
 

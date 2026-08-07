@@ -51,10 +51,10 @@ void main() {
         "author": "Author A, Author B",
         "cover": "cover.png",
         "tags": {
-          "画师": ["Hidden Artist"],
-          "题材": ["Drama"],
-          "年份": ["2024"],
-          "语言": ["中文"]
+          "题材": ["题材1", "题材2"],
+          "年份": ["2025"],
+          "语言": ["中文"],
+          "状态": ["连载中"]
         }
       }
     ''');
@@ -78,15 +78,8 @@ void main() {
     expect(comic.chapters!.allChapters, {'0': '第2话', '1': '第10话'});
     expect(
       comic.tags,
-      containsAll([
-        'Author:Author A',
-        'Author:Author B',
-        'Genre:Drama',
-        'Year:2024',
-        'Language:中文',
-      ]),
+      containsAll(['题材:题材1', '题材:题材2', '年份:2025', '语言:中文', '状态:连载中']),
     );
-    expect(comic.tags.any((tag) => tag.contains('Hidden Artist')), isFalse);
 
     final destination = Directory(comic.baseDir);
     expect(File('${destination.path}/cover.png').existsSync(), isTrue);

@@ -79,26 +79,28 @@ path-aware natural order. This format must be copied to the app local path so
 the chapter archives can be extracted. Do not mix chapter directories and
 chapter archives in the same comic directory.
 
-Optional `info.json` fields:
+Optional `info.json` example:
 
 ```json
 {
-  "title": "Comic title",
-  "author": "Author A, Author B",
-  "description": "Description",
-  "cover": "cover.jpg",
-  "stars": 4.5,
-  "updateTime": "2026-08-07",
+  "title": "漫画名",
+  "author": "作者",
+  "description": "简介",
   "tags": {
-    "Genre": ["Drama"],
-    "Year": ["2026"],
-    "Language": ["Chinese"]
-  }
+    "题材": ["题材1", "题材2"],
+    "状态": ["连载中"],
+    "年份": ["2025"],
+    "语言": ["中文"]
+  },
+  "cover": "cover.jpg",
+  "stars": 8.7
 }
 ```
 
-Local and WebDAV detail pages display only Author, Genre, Year and Language
-from metadata tags. Subtitle and Artist namespaces are ignored.
+Present fields only. The detail page displays rating, then the top-level
+`author`, then `tags` in the same order as the JSON file, followed by the
+automatic or manually supplied update time. Tag names are not restricted:
+`题材`, `地区`, `热度`, `状态` and other custom names are all allowed.
 
 ## Archive
 

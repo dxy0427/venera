@@ -119,26 +119,21 @@ void main() {
       expect(info.isEmpty, isFalse);
     });
 
-    test('keeps only ordered local and WebDAV information fields', () {
+    test('preserves tag order and allows custom fields', () {
       final info = ComicInfo.fromJson(const {
-        'author': '作者A',
+        'author': '作者',
         'tags': {
-          '画师': ['画师B'],
-          '副标题': ['副标题'],
+          '题材': ['题材1', '题材2'],
           '状态': ['连载中'],
-          '语言': ['中文'],
-          '年份': ['2024'],
-          '题材': ['剧情'],
-          '作者': ['作者C'],
+          '地区': ['韩国'],
+          '热度': ['180595'],
         },
       });
 
-      expect(info.detailTags, {
-        'Author': ['作者A', '作者C'],
-        'Genre': ['剧情'],
-        'Year': ['2024'],
-        'Language': ['中文'],
-      });
+      expect(info.authors, ['作者']);
+      expect(info.detailTags.keys, ['题材', '状态', '地区', '热度']);
+      expect(info.detailTags['题材'], ['题材1', '题材2']);
+      expect(info.detailTags['地区'], ['韩国']);
     });
   });
 }

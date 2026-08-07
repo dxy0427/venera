@@ -48,6 +48,8 @@ class LocalBuiltinSource {
           'Genres': '题材',
           'Year': '年份',
           'Language': '语言',
+          'Status': '状态',
+          'Tags': '标签',
         },
         'zh_TW': {
           'Local': '本地',
@@ -56,6 +58,8 @@ class LocalBuiltinSource {
           'Genres': '題材',
           'Year': '年份',
           'Language': '語言',
+          'Status': '狀態',
+          'Tags': '標籤',
         },
         'en_US': {
           'Local': 'Local',
@@ -64,6 +68,8 @@ class LocalBuiltinSource {
           'Genres': 'Genres',
           'Year': 'Year',
           'Language': 'Language',
+          'Status': 'Status',
+          'Tags': 'Tags',
         },
       },
       null,
@@ -97,15 +103,16 @@ class LocalBuiltinSource {
         final value = tag.substring(separator + 1);
         storedTags.putIfAbsent(namespace, () => []).add(value);
       }
-      final storedDetailTags = ComicInfo(
-        author: localComic.subtitle,
-        tags: storedTags,
-      ).detailTags;
+      final storedDetailTags = ComicInfo(tags: storedTags).detailTags
+        ..remove('Author');
       final infoDetailTags = info?.detailTags ?? const <String, List<String>>{};
-      final tags = <String, List<String>>{};
-      for (final namespace in const ['Author', 'Genre', 'Year', 'Language']) {
-        final values = infoDetailTags[namespace] ?? storedDetailTags[namespace];
-        if (values != null && values.isNotEmpty) tags[namespace] = values;
+      // Prefer live info.json, fall back to stored import tags; keep info order.
+      final tags = <String, List<String>>{
+        for (final entry in infoDetailTags.entries)
+          if (entry.value.isNotEmpty) entry.key: entry.value,
+      };
+      for (final entry in storedDetailTags.entries) {
+        tags.putIfAbsent(entry.key, () => entry.value);
       }
 
       final title = (info?.title?.trim().isNotEmpty == true)
@@ -134,7 +141,9 @@ class LocalBuiltinSource {
 
       final json = <String, dynamic>{
         'title': title,
-        'subtitle': null,
+        'subtitle': info?.author?.trim().isNotEmpty == true
+            ? info!.author!.trim()
+            : null,
         'cover': cover,
         'description': info?.description ?? localComic.description,
         'tags': tags,

@@ -182,12 +182,8 @@ class WebDavBuiltinSource {
           'Genres': '题材',
           'Year': '年份',
           'Language': '语言',
-          '作者': '作者',
-          '题材': '题材',
-          '状态': '状态',
-          '年份': '年份',
-          '语言': '语言',
-          '标签': '标签',
+          'Status': '状态',
+          'Tags': '标签',
         },
         'zh_TW': {
           'WebDAV': 'WebDAV',
@@ -199,12 +195,8 @@ class WebDavBuiltinSource {
           'Genres': '題材',
           'Year': '年份',
           'Language': '語言',
-          '作者': '作者',
-          '题材': '題材',
-          '状态': '狀態',
-          '年份': '年份',
-          '语言': '語言',
-          '标签': '標籤',
+          'Status': '狀態',
+          'Tags': '標籤',
         },
         'en_US': {
           'WebDAV': 'WebDAV',
@@ -216,6 +208,8 @@ class WebDavBuiltinSource {
           'Genres': 'Genres',
           'Year': 'Year',
           'Language': 'Language',
+          'Status': 'Status',
+          'Tags': 'Tags',
         },
       },
       null, // handleClickTagEvent
@@ -335,9 +329,8 @@ class WebDavBuiltinSource {
         if (info.title != null && info.title!.trim().isNotEmpty) {
           title = info.title!.trim();
         }
-        final detailTags = info.detailTags;
-        author = detailTags['Author']?.firstOrNull;
-        for (final entry in detailTags.entries) {
+        author = info.authors.firstOrNull;
+        for (final entry in info.detailTags.entries) {
           for (final v in entry.value) {
             tags.add('${entry.key}:$v');
           }
@@ -425,6 +418,9 @@ class WebDavBuiltinSource {
 
       final json = <String, dynamic>{
         'title': title,
+        'subtitle': info?.author?.trim().isNotEmpty == true
+            ? info!.author!.trim()
+            : null,
         'cover': cover,
         'description': info?.description ?? '',
         'tags': tags,

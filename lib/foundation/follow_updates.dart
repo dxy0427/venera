@@ -28,19 +28,12 @@ Future<ComicUpdateResult> updateComic(
       }
       var newInfo = (await comicSource.loadComicInfo!(c.id)).data;
 
+      // Local favorites keep stored cover/tags; avoid overwriting with
+      // file:// paths from the local builtin source.
       if (c.type != ComicType.local) {
         var newTags = <String>[];
         for (var entry in newInfo.tags.entries) {
-          const shouldIgnore = [
-            'author',
-            'authors',
-            'artist',
-            'artists',
-            '作者',
-            '画师',
-            '畫師',
-            'time',
-          ];
+          const shouldIgnore = ['author', 'time'];
           var namespace = entry.key;
           if (shouldIgnore.contains(namespace.toLowerCase())) continue;
           for (var tag in entry.value) {
@@ -53,7 +46,10 @@ Future<ComicUpdateResult> updateComic(
             id: c.id,
             name: newInfo.title,
             coverPath: newInfo.cover,
-            author: newInfo.findAuthor() ?? newInfo.subTitle ?? c.author,
+            author:
+                newInfo.subTitle ??
+                newInfo.tags['author']?.firstOrNull ??
+                c.author,
             type: c.type,
             tags: newTags,
           ),

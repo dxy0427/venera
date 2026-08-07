@@ -388,7 +388,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SelectableText(comic.title, style: ts.s18),
-                if (comic.subTitle != null && comic.subTitle!.trim().isNotEmpty)
+                if (comic.subTitle != null &&
+                    comic.subTitle!.trim().isNotEmpty &&
+                    comic.sourceKey != 'local' &&
+                    comic.sourceKey != 'webdav')
                   SelectableText(
                     comic.subTitle!,
                     style: ts.s14,
@@ -606,7 +609,11 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   }
 
   Widget buildInfo() {
+    final showBuiltinAuthor =
+        (comic.sourceKey == 'local' || comic.sourceKey == 'webdav') &&
+        comic.subTitle?.trim().isNotEmpty == true;
     if (comic.tags.isEmpty &&
+        !showBuiltinAuthor &&
         comic.uploader == null &&
         comic.uploadTime == null &&
         comic.updateTime == null &&
@@ -737,6 +744,13 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                     Text(comic.stars!.toStringAsFixed(1)),
                   ],
                 ),
+              ],
+            ),
+          if (showBuiltinAuthor)
+            buildWrap(
+              children: [
+                buildTag(text: 'Author'.tl, isTitle: true),
+                buildTag(text: comic.subTitle!),
               ],
             ),
           for (var e in comic.tags.entries)
