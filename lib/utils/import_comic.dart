@@ -101,7 +101,7 @@ class ImportComic {
       }
       return registerComics({
         selectedFolder: [comic],
-      }, false);
+      }, copyToLocal);
     } catch (e, s) {
       Log.error('Import Comic', e.toString(), s);
       if (App.rootContext.mounted) {
@@ -293,6 +293,7 @@ class ImportComic {
       archives,
       info: info,
       title: title,
+      copyToLocal: copyToLocal,
     );
   }
 
@@ -474,33 +475,42 @@ class ImportComic {
     List<File> archives, {
     required ComicInfo? info,
     required String title,
+    required bool copyToLocal,
     String? subtitle,
     List<String>? tags,
     DateTime? createTime,
   }) async {
     archives.sort((a, b) => naturalCompare(a.name, b.name));
-    final destinationName = findValidDirectoryName(LocalManager().path, title);
-    final destination = Directory(
-      FilePath.join(LocalManager().path, destinationName),
-    );
-    await destination.create(recursive: true);
+    final destinationName = copyToLocal
+        ? findValidDirectoryName(LocalManager().path, title)
+        : source.path;
+    final destination = copyToLocal
+        ? Directory(FilePath.join(LocalManager().path, destinationName))
+        : source;
+    if (copyToLocal) await destination.create(recursive: true);
 
     try {
       final cover = _findCoverFile(source, info?.cover);
       String? coverName;
       if (cover != null) {
-        coverName = 'cover.${cover.extension.toLowerCase()}';
-        await cover.copyMem(FilePath.join(destination.path, coverName));
+        if (copyToLocal) {
+          coverName = 'cover.${cover.extension.toLowerCase()}';
+          await cover.copyMem(FilePath.join(destination.path, coverName));
+        } else {
+          coverName = cover.path.substring(source.path.length + 1);
+        }
       }
 
       final chapterMap = <String, String>{};
       for (var index = 0; index < archives.length; index++) {
         final sourceArchive = archives[index];
         final chapterFileName = sourceArchive.name;
-        final destinationArchive = File(
-          FilePath.join(destination.path, chapterFileName),
-        );
-        await _copyArchiveToCache(sourceArchive, destinationArchive);
+        final destinationArchive = copyToLocal
+            ? File(FilePath.join(destination.path, chapterFileName))
+            : sourceArchive;
+        if (copyToLocal) {
+          await _copyArchiveToCache(sourceArchive, destinationArchive);
+        }
 
         final images = await LocalCbzReader.listImages(destinationArchive.path);
         if (images.isEmpty) {
@@ -528,15 +538,23 @@ class ImportComic {
       }
 
       final sourceInfo = File(FilePath.join(source.path, 'info.json'));
-      if (info != null && await sourceInfo.exists()) {
+      if (copyToLocal && await sourceInfo.exists()) {
         final destinationInfo = File(
           FilePath.join(destination.path, 'info.json'),
         );
-        final json = Map<String, dynamic>.from(
-          jsonDecode(await sourceInfo.readAsString()) as Map,
-        );
-        json['cover'] = coverName;
-        await destinationInfo.writeAsString(jsonEncode(json));
+        final rawInfo = await sourceInfo.readAsString();
+        try {
+          final decoded = jsonDecode(rawInfo);
+          if (decoded is Map) {
+            final json = Map<String, dynamic>.from(decoded);
+            json['cover'] = coverName;
+            await destinationInfo.writeAsString(jsonEncode(json));
+          } else {
+            await destinationInfo.writeAsString(rawInfo);
+          }
+        } on FormatException {
+          await destinationInfo.writeAsString(rawInfo);
+        }
       }
 
       return LocalComic(
@@ -552,7 +570,9 @@ class ImportComic {
         createdAt: createTime ?? DateTime.now(),
       );
     } catch (_) {
-      await destination.deleteIgnoreError(recursive: true);
+      if (copyToLocal) {
+        await destination.deleteIgnoreError(recursive: true);
+      }
       rethrow;
     }
   }

@@ -667,7 +667,7 @@ class _ImportComicsWidgetState extends State<_ImportComicsWidget> {
                     ).paddingHorizontal(8),
                   if (!App.isIOS &&
                       !App.isMacOS &&
-                      const {0, 1, 5}.contains(type))
+                      const {0, 1, 3, 5}.contains(type))
                     CheckboxListTile(
                       enabled: true,
                       title: Text("Copy to app local path".tl),

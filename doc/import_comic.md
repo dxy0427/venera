@@ -78,8 +78,12 @@ Choose `Import Comics` -> `Archive chapter directory`. Each archive is imported
 as one chapter. Archive extensions are removed from chapter names, and nested
 image folders inside an archive are read in path-aware natural order. CBZ/ZIP
 files are copied into the app local path and read directly without extraction.
-If no cover is provided, the first image from the first chapter becomes
-`cover.[ext]`. Do not put chapter directories in an archive chapter directory.
+The import dialog can disable `Copy to app local path` to register the selected
+directory in place without creating a second copy. In that mode, the source
+directory must remain available; moving or deleting it makes the comic
+unavailable. If no cover is provided, the first image from the first chapter
+becomes `cover.[ext]`. Do not put chapter directories in an archive chapter
+directory.
 Direct chapter reading currently supports regular `.cbz` and `.zip` files
 using Store or Deflate compression. Encrypted, ZIP64, multi-disk, and other
 compression formats are not supported; use the existing archive import for

@@ -131,6 +131,30 @@ void main() {
     expect(importedArchive.readAsBytesSync(), sourceArchive.readAsBytesSync());
   });
 
+  test('can read chapters in place without copying to local storage', () async {
+    final info = File('${source.path}/info.json');
+    await info.writeAsString('{"title":"In Place"}');
+    final archive = await _writeCbz(source, '第1话.cbz', {
+      '001.jpg': [1, 2, 3],
+      '002.jpg': [4, 5, 6],
+    });
+    final importer = const ImportComic(copyToLocal: false);
+
+    final comic = await importer.checkArchiveChapterDirectoryForTesting(source);
+
+    expect(comic, isNotNull);
+    expect(comic!.baseDir, source.path);
+    expect(comic.title, 'In Place');
+    expect(File('${source.path}/info.json').existsSync(), isTrue);
+    expect(
+      File('${source.path}/第1话.cbz').readAsBytesSync(),
+      archive.readAsBytesSync(),
+    );
+    final pages = await LocalCbzReader.listImageReferences(archive.path);
+    expect(await LocalCbzReader.readReference(pages.first), [1, 2, 3]);
+    expect(Directory(LocalManager().path).listSync(), isEmpty);
+  });
+
   test('ordinary directory import does not absorb archive chapters', () async {
     await File('${source.path}/cover.jpg').writeAsBytes([0]);
     await _writeCbz(source, '第1话.cbz', {
