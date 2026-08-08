@@ -954,6 +954,9 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     if (imageKey.startsWith("file://")) {
       data = await File(imageKey.substring(7)).readAsBytes();
       if (!mounted) return null;
+    } else if (imageKey.startsWith('localcbz://')) {
+      data = await loadSpecialImageBytes(imageKey);
+      if (!mounted) return null;
     } else {
       data = await (await CacheManager().findCache(
         "$imageKey@${context.reader.type.sourceKey}@${context.reader.cid}@${context.reader.eid}",

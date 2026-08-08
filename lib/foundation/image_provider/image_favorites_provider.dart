@@ -92,10 +92,8 @@ class ImageFavoritesProvider
   }
 
   Future<Uint8List?> getImageFromLocal() async {
-    var localComic = LocalManager().find(
-      sourceKey,
-      ComicType.fromKey(sourceKey),
-    );
+    if (sourceKey != 'local') return null;
+    var localComic = LocalManager().find(cid, ComicType.local);
     if (localComic == null) {
       return null;
     }
@@ -103,13 +101,9 @@ class ImageFavoritesProvider
     if (epIndex == -1 && localComic.hasChapters) {
       return null;
     }
-    var images = await LocalManager().getImages(
-      sourceKey,
-      ComicType.fromKey(sourceKey),
-      epIndex,
-    );
-    var data = await File(images[page]).readAsBytes();
-    return data;
+    var images = await LocalManager().getImages(cid, ComicType.local, eid);
+    if (page <= 0 || page > images.length) return null;
+    return loadSpecialImageBytes(images[page - 1]);
   }
 
   Future<Uint8List> getImageFromNetwork(

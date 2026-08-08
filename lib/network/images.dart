@@ -7,6 +7,7 @@ import 'package:venera/pages/webdav_comics/webdav_provider.dart';
 import 'package:venera/pages/webdav_comics/webdav_references.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/image.dart';
+import 'package:venera/utils/local_cbz.dart';
 
 import 'app_dio.dart';
 
@@ -29,13 +30,14 @@ abstract class ImageDownloader {
       return;
     }
 
-    if ((sourceKey == 'webdav' ||
+    if ((url.startsWith('localcbz://') ||
+            sourceKey == 'webdav' ||
             url.startsWith('webdav://') ||
             url.startsWith('stream://') ||
             url.startsWith('file://')) &&
         !url.startsWith('http://') &&
         !url.startsWith('https://')) {
-      final bytes = await _loadWebDavImageBytes(url);
+      final bytes = await loadSpecialImageBytes(url);
       await CacheManager().writeCache(cacheKey, bytes);
       yield ImageDownloadProgress(
         currentBytes: bytes.length,
@@ -177,17 +179,16 @@ abstract class ImageDownloader {
       return;
     }
 
-    // WebDAV / streaming / extracted local images
-    if ((sourceKey == 'webdav' ||
+    // Local CBZ entries, WebDAV streams, and extracted local images.
+    if ((imageKey.startsWith('localcbz://') ||
+            sourceKey == 'webdav' ||
             imageKey.startsWith('webdav://') ||
             imageKey.startsWith('stream://') ||
             imageKey.startsWith('file://')) &&
         !imageKey.startsWith('http://') &&
         !imageKey.startsWith('https://')) {
       try {
-        // Lazy import path via ComicSource image config is not used;
-        // load through WebDav provider when available.
-        final bytes = await _loadWebDavImageBytes(imageKey);
+        final bytes = await loadSpecialImageBytes(imageKey);
         await CacheManager().writeCache(cacheKey, bytes);
         yield ImageDownloadProgress(
           currentBytes: bytes.length,
@@ -196,7 +197,7 @@ abstract class ImageDownloader {
         );
         return;
       } catch (e) {
-        throw "WebDAV image load failed: $e";
+        throw "Special image load failed: $e";
       }
     }
 
@@ -379,9 +380,12 @@ class _StreamWrapper<T> {
   }
 }
 
-Future<Uint8List> _loadWebDavImageBytes(String imageKey) async {
+Future<Uint8List> loadSpecialImageBytes(String imageKey) async {
   if (imageKey.startsWith('file://')) {
     return File(imageKey.substring(7)).readAsBytes();
+  }
+  if (imageKey.startsWith('localcbz://')) {
+    return LocalCbzReader.readReference(imageKey);
   }
   final ref = WebDavResourceRef.parse(imageKey);
   return WebDavProvider.forAccount(ref.accountId).loadImage(imageKey);

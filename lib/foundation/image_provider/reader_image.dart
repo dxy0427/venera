@@ -48,6 +48,8 @@ class ReaderImageProvider
       } else {
         throw "Error: File not found.";
       }
+    } else if (imageKey.startsWith('localcbz://')) {
+      imageBytes = await loadSpecialImageBytes(imageKey);
     } else {
       await for (var event in ImageDownloader.loadComicImage(
         imageKey,

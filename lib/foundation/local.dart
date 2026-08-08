@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:isolate';
 
-import 'package:flutter/widgets.dart' show ChangeNotifier;
+import 'package:flutter/foundation.dart' show ChangeNotifier, visibleForTesting;
 import 'package:flutter_saf/flutter_saf.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -14,6 +14,7 @@ import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/background_download.dart';
+import 'package:venera/utils/local_cbz.dart';
 import 'package:venera/utils/natural_sort.dart';
 
 import 'app.dart';
@@ -286,22 +287,7 @@ class LocalManager with ChangeNotifier {
   }
 
   Future<void> init() async {
-    _db = openSqliteDatabase('${App.dataPath}/local.db');
-    _db.execute('''
-      CREATE TABLE IF NOT EXISTS comics (
-        id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        subtitle TEXT NOT NULL,
-        tags TEXT NOT NULL,
-        directory TEXT NOT NULL,
-        chapters TEXT NOT NULL,
-        cover TEXT NOT NULL,
-        comic_type INTEGER NOT NULL,
-        downloadedChapters TEXT NOT NULL,
-        created_at INTEGER,
-        PRIMARY KEY (id, comic_type)
-      );
-    ''');
+    _initDatabase();
     if (File(FilePath.join(App.dataPath, 'local_path')).existsSync()) {
       path = File(FilePath.join(App.dataPath, 'local_path')).readAsStringSync();
       if (!directory.existsSync()) {
@@ -321,6 +307,31 @@ class LocalManager with ChangeNotifier {
     _checkNoMedia();
     await ComicSourceManager().ensureInit();
     restoreDownloadingTasks();
+  }
+
+  void _initDatabase() {
+    _db = openSqliteDatabase('${App.dataPath}/local.db');
+    _db.execute('''
+      CREATE TABLE IF NOT EXISTS comics (
+        id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT NOT NULL,
+        tags TEXT NOT NULL,
+        directory TEXT NOT NULL,
+        chapters TEXT NOT NULL,
+        cover TEXT NOT NULL,
+        comic_type INTEGER NOT NULL,
+        downloadedChapters TEXT NOT NULL,
+        created_at INTEGER,
+        PRIMARY KEY (id, comic_type)
+      );
+    ''');
+  }
+
+  @visibleForTesting
+  void initForTesting(String localPath) {
+    path = localPath;
+    _initDatabase();
   }
 
   String findValidId(ComicType type) {
@@ -463,6 +474,10 @@ class LocalManager with ChangeNotifier {
       var cid = ep is int
           ? comic.chapters!.ids.elementAt(ep - 1)
           : (ep as String);
+      final chapterArchive = File(FilePath.join(comic.baseDir, cid));
+      if (await chapterArchive.exists() && _isZipArchiveName(cid)) {
+        return LocalCbzReader.listImageReferences(chapterArchive.path);
+      }
       cid = getChapterDirectoryName(cid);
       directory = Directory(FilePath.join(directory.path, cid));
     }
@@ -544,7 +559,9 @@ class LocalManager with ChangeNotifier {
     var chapterDir = Directory(
       FilePath.join(comic.baseDir, getChapterDirectoryName(cid)),
     );
-    return chapterDir.existsSync();
+    if (chapterDir.existsSync()) return true;
+    return File(FilePath.join(comic.baseDir, cid)).existsSync() &&
+        _isZipArchiveName(cid);
   }
 
   List<DownloadTask> downloadingTasks = [];
@@ -725,17 +742,22 @@ class LocalManager with ChangeNotifier {
         c.comicType.value,
       ]);
     }
-    var shouldRemovedDirs = <Directory>[];
+    var shouldRemovedEntities = <FileSystemEntity>[];
     for (var chapter in chapters) {
       var dir = Directory(
         FilePath.join(c.baseDir, getChapterDirectoryName(chapter)),
       );
       if (dir.existsSync()) {
-        shouldRemovedDirs.add(dir);
+        shouldRemovedEntities.add(dir);
+        continue;
+      }
+      final archive = File(FilePath.join(c.baseDir, chapter));
+      if (archive.existsSync() && _isZipArchiveName(chapter)) {
+        shouldRemovedEntities.add(archive);
       }
     }
-    if (shouldRemovedDirs.isNotEmpty) {
-      _deleteDirectories(shouldRemovedDirs);
+    if (shouldRemovedEntities.isNotEmpty) {
+      _deleteEntities(shouldRemovedEntities);
     }
     notifyListeners();
   }
@@ -781,24 +803,28 @@ class LocalManager with ChangeNotifier {
     notifyListeners();
 
     if (removeFileOnDisk) {
-      _deleteDirectories(shouldRemovedDirs);
+      _deleteEntities(shouldRemovedDirs);
     }
   }
 
-  /// Deletes the directories in a separate isolate to avoid blocking the UI thread.
-  static void _deleteDirectories(List<Directory> directories) {
+  static void _deleteEntities(List<FileSystemEntity> entities) {
     Isolate.run(() async {
       await SAFTaskWorker().init();
-      for (var dir in directories) {
+      for (final entity in entities) {
         try {
-          if (dir.existsSync()) {
-            await dir.delete(recursive: true);
+          if (entity.existsSync()) {
+            await entity.delete(recursive: entity is Directory);
           }
-        } catch (e) {
+        } catch (_) {
           continue;
         }
       }
     });
+  }
+
+  static bool _isZipArchiveName(String name) {
+    final lower = name.toLowerCase();
+    return lower.endsWith('.cbz') || lower.endsWith('.zip');
   }
 
   static String getChapterDirectoryName(String name) {

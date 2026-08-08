@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/local.dart';
-import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/import_comic.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/local_cbz.dart';
 
 void main() {
   final sourceRoot = Platform.environment['VENERA_ARCHIVE_CHAPTER_TEST_ROOT'];
@@ -19,26 +19,6 @@ void main() {
     LocalManager().path = await Directory(
       '${root.path}/local',
     ).create().then((directory) => directory.path);
-
-    final realExtractor = CBZ.extractor;
-    addTearDown(() => CBZ.extractor = realExtractor);
-    CBZ.extractor = (archive, out) async {
-      final result = await Process.run('unzip', [
-        '-qq',
-        '-o',
-        archive.path,
-        '-d',
-        out.path,
-      ]);
-      if (result.exitCode != 0) {
-        throw ProcessException(
-          'unzip',
-          [archive.path],
-          result.stderr.toString(),
-          result.exitCode,
-        );
-      }
-    };
 
     final sourceDirectories =
         Directory(sourceRoot!).listSync().whereType<Directory>().toList()
@@ -66,9 +46,24 @@ void main() {
       }
 
       for (final chapterId in comic.chapters!.ids) {
-        final chapter = Directory('${comic.baseDir}/$chapterId');
-        final images = chapter.listSync().whereType<File>().toList();
-        expect(images, isNotEmpty, reason: chapter.path);
+        final sourceArchive = File('${source.path}/$chapterId');
+        final importedArchive = File('${comic.baseDir}/$chapterId');
+        expect(importedArchive.existsSync(), isTrue, reason: chapterId);
+        expect(Directory(importedArchive.path).existsSync(), isFalse);
+        expect(await importedArchive.length(), await sourceArchive.length());
+
+        final images = await LocalCbzReader.listImageReferences(
+          importedArchive.path,
+        );
+        expect(images, isNotEmpty, reason: importedArchive.path);
+        final indexes = <int>{0, images.length ~/ 2, images.length - 1};
+        for (final index in indexes) {
+          expect(
+            await LocalCbzReader.readReference(images[index]),
+            isNotEmpty,
+            reason: '${importedArchive.path} page $index',
+          );
+        }
       }
     }
   }, skip: sourceRoot == null);

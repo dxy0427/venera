@@ -11,6 +11,7 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:sqlite3/sqlite3.dart' as sql;
 import 'package:venera/utils/ext.dart';
+import 'package:venera/utils/local_cbz.dart';
 import 'package:venera/utils/natural_sort.dart';
 import 'package:venera/utils/translations.dart';
 import 'cbz.dart';
@@ -19,6 +20,7 @@ import 'io.dart';
 class ImportComic {
   static const _coverBaseNames = {'cover', 'folder', 'thumb', '封面'};
   static const _archiveExtensions = {'cbz', 'zip', '7z', 'cb7'};
+  static const _directReadArchiveExtensions = {'cbz', 'zip'};
   static const _imageExtensions = {'jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'};
 
   final String? selectedFolder;
@@ -80,8 +82,8 @@ class ImportComic {
 
   /// Import one comic directory whose archive files are chapters.
   ///
-  /// The cover and `info.json` are optional. When no cover is provided, the
-  /// first image from the first chapter is copied as the generated cover.
+  /// The cover and `info.json` are optional. CBZ/ZIP chapters are copied into
+  /// the app local path without extraction and read directly on demand.
   Future<bool> archiveChapterDirectory() async {
     final picker = DirectoryPicker();
     final directory = await picker.pickDirectory();
@@ -272,8 +274,15 @@ class ImportComic {
         );
       }
       if (entry is File &&
-          _archiveExtensions.contains(entry.extension.toLowerCase())) {
+          _directReadArchiveExtensions.contains(
+            entry.extension.toLowerCase(),
+          )) {
         archives.add(entry);
+      } else if (entry is File &&
+          _archiveExtensions.contains(entry.extension.toLowerCase())) {
+        throw Exception(
+          'Direct archive chapter reading supports CBZ and ZIP only.',
+        );
       }
     }
     if (archives.isEmpty) {
@@ -474,9 +483,6 @@ class ImportComic {
     final destination = Directory(
       FilePath.join(LocalManager().path, destinationName),
     );
-    final extractDir = Directory(
-      FilePath.join(App.cachePath, 'archive_chapter_import'),
-    );
     await destination.create(recursive: true);
 
     try {
@@ -489,61 +495,36 @@ class ImportComic {
 
       final chapterMap = <String, String>{};
       for (var index = 0; index < archives.length; index++) {
-        await extractDir.deleteIgnoreError(recursive: true);
-        await extractDir.create(recursive: true);
-        File archive = archives[index];
-        File? temporaryArchive;
-        if (App.isAndroid) {
-          temporaryArchive = File(
-            FilePath.join(
-              App.cachePath,
-              'archive_chapter.${archive.extension.toLowerCase()}',
-            ),
-          );
-          await _copyArchiveToCache(archive, temporaryArchive);
-          archive = temporaryArchive;
-        }
-        try {
-          await CBZ.extractArchive(archive, extractDir);
-        } finally {
-          await temporaryArchive?.deleteIgnoreError();
-        }
-        final allImages = CBZ.collectImages(extractDir);
-        final images = allImages.where((file) {
-          final base = file.basenameWithoutExt.toLowerCase();
-          return !_coverBaseNames.contains(base);
-        }).toList();
-        if (allImages.isEmpty) {
+        final sourceArchive = archives[index];
+        final chapterFileName = sourceArchive.name;
+        final destinationArchive = File(
+          FilePath.join(destination.path, chapterFileName),
+        );
+        await _copyArchiveToCache(sourceArchive, destinationArchive);
+
+        final images = await LocalCbzReader.listImages(destinationArchive.path);
+        if (images.isEmpty) {
           throw Exception('No images found in ${archives[index].name}');
         }
         if (coverName == null) {
-          final firstImage =
-              allImages.firstWhereOrNull(
-                (file) => _coverBaseNames.contains(
-                  file.basenameWithoutExt.toLowerCase(),
+          final coverEntry =
+              images.firstWhereOrNull(
+                (entry) => _coverBaseNames.contains(
+                  _archiveEntryBaseName(entry.fileName).toLowerCase(),
                 ),
               ) ??
-              allImages.first;
-          coverName = 'cover.${firstImage.extension.toLowerCase()}';
-          await firstImage.copyMem(FilePath.join(destination.path, coverName));
-        }
-        if (images.isEmpty) images.addAll(allImages);
-
-        final chapterId = index.toString();
-        final chapterDir = Directory(
-          FilePath.join(destination.path, chapterId),
-        );
-        await chapterDir.create();
-        for (var page = 0; page < images.length; page++) {
-          final image = images[page];
-          await image.copyMem(
-            FilePath.join(
-              chapterDir.path,
-              '${(page + 1).toString().padLeft(4, '0')}.${image.extension.toLowerCase()}',
-            ),
+              images.first;
+          final extension = _archiveEntryExtension(coverEntry.fileName);
+          coverName = 'cover.$extension';
+          final bytes = await LocalCbzReader.readEntry(
+            destinationArchive.path,
+            coverEntry.fileName,
           );
+          await File(
+            FilePath.join(destination.path, coverName),
+          ).writeAsBytes(bytes);
         }
-        chapterMap[chapterId] = _archiveDisplayName(archives[index].name);
+        chapterMap[chapterFileName] = _archiveDisplayName(chapterFileName);
       }
 
       final sourceInfo = File(FilePath.join(source.path, 'info.json'));
@@ -573,8 +554,6 @@ class ImportComic {
     } catch (_) {
       await destination.deleteIgnoreError(recursive: true);
       rethrow;
-    } finally {
-      await extractDir.deleteIgnoreError(recursive: true);
     }
   }
 
@@ -618,6 +597,18 @@ class ImportComic {
   static String _archiveDisplayName(String name) {
     final dot = name.lastIndexOf('.');
     return dot > 0 ? name.substring(0, dot) : name;
+  }
+
+  static String _archiveEntryExtension(String name) {
+    final dot = name.lastIndexOf('.');
+    if (dot < 0 || dot == name.length - 1) return 'jpg';
+    return name.substring(dot + 1).toLowerCase();
+  }
+
+  static String _archiveEntryBaseName(String name) {
+    final leaf = name.replaceAll('\\', '/').split('/').last;
+    final dot = leaf.lastIndexOf('.');
+    return dot > 0 ? leaf.substring(0, dot) : leaf;
   }
 
   static Future<void> _copyArchiveToCache(File source, File destination) async {

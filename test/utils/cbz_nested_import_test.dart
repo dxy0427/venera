@@ -1,16 +1,16 @@
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/local.dart';
-import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/import_comic.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/local_cbz.dart';
 
 void main() {
   late Directory root;
   late Directory source;
   late Directory local;
   late Directory cache;
-  final realExtractor = CBZ.extractor;
 
   setUp(() async {
     root = await Directory.systemTemp.createTemp('archive-folder-import-');
@@ -23,27 +23,43 @@ void main() {
   });
 
   tearDown(() async {
-    CBZ.extractor = realExtractor;
     await root.delete(recursive: true);
   });
 
-  test('collectImages keeps nested archive folders contiguous', () async {
-    final extracted = await Directory('${root.path}/extracted').create();
-    await Directory('${extracted.path}/Vol.10').create();
-    await Directory('${extracted.path}/Vol.2').create();
-    await File('${extracted.path}/Vol.10/001.jpg').writeAsBytes([10]);
-    await File('${extracted.path}/Vol.2/010.jpg').writeAsBytes([2, 10]);
-    await File('${extracted.path}/Vol.2/002.jpg').writeAsBytes([2, 2]);
+  test('lists nested CBZ images in path-aware natural order', () async {
+    final archive = await _writeCbz(source, 'chapter.cbz', {
+      'Vol.10/001.jpg': [10],
+      'Vol.2/010.jpg': [2, 10],
+      'Vol.2/002.jpg': [2, 2],
+    });
 
-    final relative = CBZ
-        .collectImages(extracted)
-        .map((file) => file.path.substring(extracted.path.length + 1))
-        .toList();
+    final images = await LocalCbzReader.listImages(archive.path);
 
-    expect(relative, ['Vol.2/002.jpg', 'Vol.2/010.jpg', 'Vol.10/001.jpg']);
+    expect(images.map((entry) => entry.fileName), [
+      'Vol.2/002.jpg',
+      'Vol.2/010.jpg',
+      'Vol.10/001.jpg',
+    ]);
   });
 
-  test('imports cover, info.json and multiple CBZ files as chapters', () async {
+  test(
+    'excludes an archive cover from chapter pages when other pages exist',
+    () async {
+      final archive = await _writeCbz(source, 'chapter.cbz', {
+        'cover.jpg': [0],
+        '001.jpg': [1],
+        '002.jpg': [2],
+      });
+
+      final pages = await LocalCbzReader.listImageReferences(archive.path);
+
+      expect(pages, hasLength(2));
+      expect(await LocalCbzReader.readReference(pages.first), [1]);
+      expect(await LocalCbzReader.readReference(pages.last), [2]);
+    },
+  );
+
+  test('imports CBZ chapters without extracting them', () async {
     await File('${source.path}/cover.png').writeAsBytes([0]);
     await File('${source.path}/info.json').writeAsString('''
       {
@@ -58,17 +74,14 @@ void main() {
         }
       }
     ''');
-    await File('${source.path}/第10话.cbz').writeAsBytes([10]);
-    await File('${source.path}/第2话.cbz').writeAsBytes([2]);
-
-    CBZ.extractor = (archive, out) async {
-      final folder = archive.name.contains('2') ? 'Vol.2' : 'Vol.10';
-      final nested = await Directory(
-        '${out.path}/$folder',
-      ).create(recursive: true);
-      await File('${nested.path}/002.jpg').writeAsBytes([2]);
-      await File('${nested.path}/001.jpg').writeAsBytes([1]);
-    };
+    await _writeCbz(source, '第10话.cbz', {
+      'Vol.10/002.jpg': [10, 2],
+      'Vol.10/001.jpg': [10, 1],
+    });
+    await _writeCbz(source, '第2话.cbz', {
+      'Vol.2/002.jpg': [2, 2],
+      'Vol.2/001.jpg': [2, 1],
+    });
 
     final comic = await const ImportComic()
         .checkArchiveChapterDirectoryForTesting(source);
@@ -76,7 +89,7 @@ void main() {
     expect(comic, isNotNull);
     expect(comic!.title, 'Imported Comic');
     expect(comic.subtitle, 'Author A, Author B');
-    expect(comic.chapters!.allChapters, {'0': '第2话', '1': '第10话'});
+    expect(comic.chapters!.allChapters, {'第2话.cbz': '第2话', '第10话.cbz': '第10话'});
     expect(
       comic.tags,
       containsAll(['题材:题材1', '题材:题材2', '年份:2025', '语言:中文', '状态:连载中']),
@@ -85,27 +98,24 @@ void main() {
     final destination = Directory(comic.baseDir);
     expect(File('${destination.path}/cover.png').existsSync(), isTrue);
     expect(File('${destination.path}/info.json').existsSync(), isTrue);
-    expect(
-      await File('${destination.path}/info.json').readAsString(),
-      contains('"cover":"cover.png"'),
+    expect(File('${destination.path}/第2话.cbz').existsSync(), isTrue);
+    expect(File('${destination.path}/第10话.cbz').existsSync(), isTrue);
+    expect(Directory('${destination.path}/第2话.cbz').existsSync(), isFalse);
+
+    final pages = await LocalCbzReader.listImageReferences(
+      '${destination.path}/第2话.cbz',
     );
-    final firstChapter = Directory(
-      '${destination.path}/0',
-    ).listSync().map((e) => e.name).toList()..sort();
-    final secondChapter = Directory(
-      '${destination.path}/1',
-    ).listSync().map((e) => e.name).toList()..sort();
-    expect(firstChapter, ['0001.jpg', '0002.jpg']);
-    expect(secondChapter, ['0001.jpg', '0002.jpg']);
+    expect(pages, hasLength(2));
+    expect(pages, everyElement(startsWith('localcbz://')));
+    expect(await LocalCbzReader.readReference(pages.first), [2, 1]);
+    expect(await LocalCbzReader.readReference(pages.last), [2, 2]);
   });
 
-  test('generates a cover when cover and info.json are missing', () async {
-    await File('${source.path}/第1话.cbz').writeAsBytes([1]);
-
-    CBZ.extractor = (archive, out) async {
-      await File('${out.path}/001.webp').writeAsBytes([1, 2, 3]);
-      await File('${out.path}/002.webp').writeAsBytes([4, 5, 6]);
-    };
+  test('generates a cover but keeps the chapter archive intact', () async {
+    final sourceArchive = await _writeCbz(source, '第1话.cbz', {
+      '001.webp': [1, 2, 3],
+      '002.webp': [4, 5, 6],
+    });
 
     final comic = await const ImportComic()
         .checkArchiveChapterDirectoryForTesting(source);
@@ -115,12 +125,17 @@ void main() {
     expect(comic.cover, 'cover.webp');
     expect(File('${comic.baseDir}/cover.webp').readAsBytesSync(), [1, 2, 3]);
     expect(File('${comic.baseDir}/info.json').existsSync(), isFalse);
-    expect(comic.chapters!.allChapters, {'0': '第1话'});
+    expect(comic.chapters!.allChapters, {'第1话.cbz': '第1话'});
+    final importedArchive = File('${comic.baseDir}/第1话.cbz');
+    expect(importedArchive.existsSync(), isTrue);
+    expect(importedArchive.readAsBytesSync(), sourceArchive.readAsBytesSync());
   });
 
   test('ordinary directory import does not absorb archive chapters', () async {
     await File('${source.path}/cover.jpg').writeAsBytes([0]);
-    await File('${source.path}/第1话.cbz').writeAsBytes([1]);
+    await _writeCbz(source, '第1话.cbz', {
+      '001.jpg': [1],
+    });
 
     final comic = await const ImportComic().checkSingleComicForTesting(source);
 
@@ -128,10 +143,11 @@ void main() {
   });
 
   test('rejects chapter folders in an archive chapter directory', () async {
-    await File('${source.path}/cover.jpg').writeAsBytes([0]);
     final chapter = await Directory('${source.path}/第1话').create();
     await File('${chapter.path}/001.jpg').writeAsBytes([1]);
-    await File('${source.path}/第2话.cbz').writeAsBytes([2]);
+    await _writeCbz(source, '第2话.cbz', {
+      '001.jpg': [2],
+    });
 
     expect(
       const ImportComic().checkArchiveChapterDirectoryForTesting(source),
@@ -143,4 +159,30 @@ void main() {
       ),
     );
   });
+
+  test('rejects 7z chapters in direct-read mode', () async {
+    await File('${source.path}/第1话.7z').writeAsBytes([1]);
+
+    expect(
+      const ImportComic().checkArchiveChapterDirectoryForTesting(source),
+      throwsA(
+        predicate(
+          (error) => error.toString().contains('supports CBZ and ZIP only'),
+        ),
+      ),
+    );
+  });
+}
+
+Future<File> _writeCbz(
+  Directory directory,
+  String name,
+  Map<String, List<int>> entries,
+) async {
+  final archive = Archive();
+  for (final entry in entries.entries) {
+    archive.addFile(ArchiveFile(entry.key, entry.value.length, entry.value));
+  }
+  final bytes = ZipEncoder().encodeBytes(archive);
+  return File('${directory.path}/$name').writeAsBytes(bytes);
 }

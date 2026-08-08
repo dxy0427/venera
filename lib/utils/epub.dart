@@ -6,7 +6,57 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/local_cbz.dart';
+import 'package:venera/utils/natural_sort.dart';
 import 'package:zip_flutter/zip_flutter.dart';
+
+const _epubImageExtensions = {
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+  'gif',
+  'jpe',
+  'bmp',
+  'tiff',
+  'tif',
+  'avif',
+};
+
+class EpubImage {
+  final String reference;
+  final String extension;
+
+  const EpubImage({required this.reference, required this.extension});
+
+  Future<Uint8List> readAsBytes() {
+    if (reference.startsWith('localcbz://')) {
+      return LocalCbzReader.readReference(reference);
+    }
+    final path = reference.startsWith('file://')
+        ? reference.substring(7)
+        : reference;
+    return File(path).readAsBytes();
+  }
+
+  static EpubImage fromReference(String reference) {
+    final name = reference.startsWith('localcbz://')
+        ? LocalCbzResourceRef.parse(reference).entryName
+        : reference;
+    final dot = name.lastIndexOf('.');
+    return EpubImage(
+      reference: reference,
+      extension: dot < 0 ? 'jpg' : name.substring(dot + 1).toLowerCase(),
+    );
+  }
+}
+
+class EpubChapter {
+  final String title;
+  final List<EpubImage> images;
+
+  const EpubChapter({required this.title, required this.images});
+}
 
 class EpubData {
   final String title;
@@ -15,7 +65,7 @@ class EpubData {
 
   final File cover;
 
-  final Map<String, List<File>> chapters;
+  final List<EpubChapter> chapters;
 
   const EpubData({
     required this.title,
@@ -71,13 +121,13 @@ Future<File> createEpubComic(
   manifestStrBuilder.writeln(
     '        <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
   );
-  for (final chapter in data.chapters.keys) {
+  for (final chapter in data.chapters) {
     var images = <String>[];
-    for (final image in data.chapters[chapter]!) {
+    for (final image in chapter.images) {
       final ext = image.extension;
       imageDir
           .joinFile('img$imgIndex.$ext')
-          .writeAsBytesSync(image.readAsBytesSync());
+          .writeAsBytesSync(await image.readAsBytes());
       images.add('images/img$imgIndex.$ext');
       var mime = FileType.fromExtension(ext).mime;
       manifestStrBuilder.writeln(
@@ -93,7 +143,7 @@ Future<File> createEpubComic(
     "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-    <title>$chapter</title>
+    <title>${chapter.title}</title>
     <style type="text/css">
         img { 
             max-width: 100%;
@@ -106,7 +156,7 @@ Future<File> createEpubComic(
     </style>
 </head>
 <body>
-    <h1>$chapter</h1>
+    <h1>${chapter.title}</h1>
     <div>
 ${images.map((e) => '        <img src="$e" alt="$e"/>').join('\n')}
     </div>
@@ -151,7 +201,7 @@ ${spineStrBuilder.toString()}
   final tocNcx = File(FilePath.join(workingDir.path, 'toc.ncx'));
   var navMapStrBuilder = StringBuffer();
   var playOrder = 2;
-  final chapterNames = data.chapters.keys.toList();
+  final chapterNames = data.chapters.map((chapter) => chapter.title).toList();
   for (var i = 0; i < chapterIndex; i++) {
     navMapStrBuilder.writeln(
       '        <navPoint id="chapter$i" playOrder="$playOrder">',
@@ -194,13 +244,36 @@ Future<File> createEpubWithLocalComic(
   LocalComic comic,
   String outFilePath,
 ) async {
-  var chapters = <String, List<File>>{};
+  var chapters = await collectEpubImages(comic);
+  var data = EpubData(
+    title: comic.title,
+    author: comic.subtitle,
+    cover: comic.coverFile,
+    chapters: chapters,
+  );
+
+  final cacheDir = App.cachePath;
+
+  return Isolate.run(
+    () => overrideIO(() async {
+      return createEpubComic(data, cacheDir, outFilePath);
+    }),
+  );
+}
+
+Future<List<EpubChapter>> collectEpubImages(LocalComic comic) async {
+  var chapters = <EpubChapter>[];
   if (comic.chapters == null) {
-    chapters[comic.title] = (await LocalManager().getImages(
-      comic.id,
-      comic.comicType,
-      0,
-    )).map((e) => File(e)).toList();
+    chapters.add(
+      EpubChapter(
+        title: comic.title,
+        images: (await LocalManager().getImages(
+          comic.id,
+          comic.comicType,
+          0,
+        )).map(EpubImage.fromReference).toList(),
+      ),
+    );
   } else {
     var availableChapters = <String>[];
     var missingChapters = <String>[];
@@ -212,6 +285,9 @@ Future<File> createEpubWithLocalComic(
         FilePath.join(comic.baseDir, LocalManager.getChapterDirectoryName(c)),
       );
       if (chapterDir.existsSync()) {
+        availableChapters.add(c);
+      } else if (_isDirectReadArchive(c) &&
+          File(FilePath.join(comic.baseDir, c)).existsSync()) {
         availableChapters.add(c);
       } else {
         missingChapters.add(c);
@@ -231,25 +307,47 @@ Future<File> createEpubWithLocalComic(
       );
     }
     for (var chapter in availableChapters) {
-      chapters[comic.chapters![chapter]!] = (await LocalManager().getImages(
-        comic.id,
-        comic.comicType,
-        chapter,
-      )).map((e) => File(e)).toList();
+      chapters.add(
+        EpubChapter(
+          title: comic.chapters![chapter]!,
+          images: (await _listChapterImages(
+            comic,
+            chapter,
+          )).map(EpubImage.fromReference).toList(),
+        ),
+      );
     }
   }
-  var data = EpubData(
-    title: comic.title,
-    author: comic.subtitle,
-    cover: comic.coverFile,
-    chapters: chapters,
-  );
+  return chapters;
+}
 
-  final cacheDir = App.cachePath;
-
-  return Isolate.run(
-    () => overrideIO(() async {
-      return createEpubComic(data, cacheDir, outFilePath);
-    }),
+Future<List<String>> _listChapterImages(
+  LocalComic comic,
+  String chapter,
+) async {
+  final archive = File(FilePath.join(comic.baseDir, chapter));
+  if (await archive.exists() && _isDirectReadArchive(chapter)) {
+    return LocalCbzReader.listImageReferences(archive.path);
+  }
+  final directory = Directory(
+    FilePath.join(comic.baseDir, LocalManager.getChapterDirectoryName(chapter)),
   );
+  final files =
+      directory
+          .listSync()
+          .whereType<File>()
+          .where(
+            (file) =>
+                !file.name.startsWith('.') &&
+                !file.name.startsWith('cover.') &&
+                _epubImageExtensions.contains(file.extension.toLowerCase()),
+          )
+          .toList()
+        ..sort((a, b) => naturalCompare(a.name, b.name));
+  return files.map((file) => 'file://${file.path}').toList();
+}
+
+bool _isDirectReadArchive(String name) {
+  final lower = name.toLowerCase();
+  return lower.endsWith('.cbz') || lower.endsWith('.zip');
 }

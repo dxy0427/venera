@@ -605,7 +605,7 @@ class _ImportComicsWidgetState extends State<_ImportComicsWidget> {
           .tl,
       "Select a directory which contains the comic directories.".tl,
       "Select an archive file (cbz, zip, 7z, cb7)".tl,
-      "Select one comic directory containing chapter archives (cbz, zip, 7z, cb7). Cover and info.json are optional; the first page becomes the cover when needed."
+      "Select one comic directory containing CBZ or ZIP chapters. Archives are copied without extraction. Cover and info.json are optional; the first page becomes the cover when needed."
           .tl,
       "Select a directory which contains multiple archive files.".tl,
       "Select an EhViewer database and a download folder.".tl,

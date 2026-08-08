@@ -8,6 +8,7 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/local_cbz.dart';
 import 'package:venera/pages/local_comics/chapter_export.dart';
 import 'package:venera/utils/natural_sort.dart';
 import 'package:zip_flutter/zip_flutter.dart';
@@ -260,10 +261,9 @@ abstract class CBZ {
         var pageCount = images.length;
         int i = 1;
         for (var image in images) {
-          var src = File(_localFilePathFromImageUri(image));
           var dstName = compatiblePageFileName(i, image.split('.').last);
           var dst = File(FilePath.join(cache.path, dstName));
-          await src.copyMem(dst.path);
+          await dst.writeAsBytes(await _readLocalImageReference(image));
           i++;
         }
         var cover = comic.coverFile;
@@ -347,7 +347,9 @@ abstract class CBZ {
       var chapterDir = Directory(
         FilePath.join(comic.baseDir, LocalManager.getChapterDirectoryName(c)),
       );
-      if (chapterDir.existsSync()) {
+      final chapterArchive = File(FilePath.join(comic.baseDir, c));
+      if (chapterDir.existsSync() ||
+          (chapterArchive.existsSync() && _isDirectReadArchive(c))) {
         availableChapters.add(c);
       } else {
         missingChapters.add(c);
@@ -384,6 +386,10 @@ abstract class CBZ {
   ) async {
     var directory = Directory(comic.baseDir);
     if (comic.hasChapters) {
+      final chapterArchive = File(FilePath.join(comic.baseDir, chapterId));
+      if (await chapterArchive.exists() && _isDirectReadArchive(chapterId)) {
+        return LocalCbzReader.listImageReferences(chapterArchive.path);
+      }
       var cid = LocalManager.getChapterDirectoryName(chapterId);
       directory = Directory(FilePath.join(directory.path, cid));
     }
@@ -445,10 +451,10 @@ abstract class CBZ {
     final pageCount = allImages.length;
     int i = 1;
     for (var image in allImages) {
-      var src = File(_localFilePathFromImageUri(image));
-      var dstName = compatiblePageFileName(i, image.split('.').last);
+      final extension = _imageReferenceExtension(image);
+      var dstName = compatiblePageFileName(i, extension);
       var dst = File(FilePath.join(cache.path, dstName));
-      await src.copyMem(dst.path);
+      await dst.writeAsBytes(await _readLocalImageReference(image));
       i++;
     }
     if (includeCover) {
@@ -585,6 +591,28 @@ abstract class CBZ {
       nextPage = end + 1;
     }
     return chapters;
+  }
+
+  static Future<Uint8List> _readLocalImageReference(String image) {
+    if (image.startsWith('localcbz://')) {
+      return LocalCbzReader.readReference(image);
+    }
+    return File(_localFilePathFromImageUri(image)).readAsBytes();
+  }
+
+  static String _imageReferenceExtension(String image) {
+    if (image.startsWith('localcbz://')) {
+      final entryName = LocalCbzResourceRef.parse(image).entryName;
+      final dot = entryName.lastIndexOf('.');
+      return dot < 0 ? 'jpg' : entryName.substring(dot + 1);
+    }
+    final dot = image.lastIndexOf('.');
+    return dot < 0 ? 'jpg' : image.substring(dot + 1);
+  }
+
+  static bool _isDirectReadArchive(String name) {
+    final lower = name.toLowerCase();
+    return lower.endsWith('.cbz') || lower.endsWith('.zip');
   }
 
   static String buildComicInfoXmlForTesting(

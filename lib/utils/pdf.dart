@@ -6,6 +6,7 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/utils/image.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/local_cbz.dart';
 import 'package:zip_flutter/zip_flutter.dart';
 
 typedef DecodeImage = Future<Image> Function(Uint8List data);
@@ -17,6 +18,20 @@ Future<void> _createPdfFromComic({
   required String appVersion,
   required DecodeImage decodeImage,
 }) async {
+  var images = await _listPdfImages(comic, localPath);
+
+  var generator = PdfGenerator(
+    title: comic.title,
+    author: comic.subtitle,
+    imagePaths: images,
+    outputPath: savePath,
+    appVersion: appVersion,
+    decodeImage: decodeImage,
+  );
+  await generator.generate();
+}
+
+Future<List<String>> _listPdfImages(LocalComic comic, String localPath) async {
   var images = <String>[];
 
   var baseDir = comic.directory.contains('/') || comic.directory.contains('\\')
@@ -53,23 +68,35 @@ Future<void> _createPdfFromComic({
     }
   } else {
     for (var chapter in comic.downloadedChapters) {
-      var files = Directory(FilePath.join(baseDir, chapter)).listSync();
-      reorderFiles(files);
-      for (var file in files) {
-        images.add(file.path);
+      final archive = File(FilePath.join(baseDir, chapter));
+      if (archive.existsSync() && _isDirectReadArchive(chapter)) {
+        images.addAll(await LocalCbzReader.listImageReferences(archive.path));
+        continue;
+      }
+      final chapterDir = Directory(
+        FilePath.join(baseDir, LocalManager.getChapterDirectoryName(chapter)),
+      );
+      if (chapterDir.existsSync()) {
+        var files = chapterDir.listSync();
+        reorderFiles(files);
+        for (var file in files) {
+          images.add(file.path);
+        }
       }
     }
   }
 
-  var generator = PdfGenerator(
-    title: comic.title,
-    author: comic.subtitle,
-    imagePaths: images,
-    outputPath: savePath,
-    appVersion: appVersion,
-    decodeImage: decodeImage,
-  );
-  await generator.generate();
+  return images;
+}
+
+Future<List<String>> listPdfImagesForTesting(
+  LocalComic comic,
+  String localPath,
+) => _listPdfImages(comic, localPath);
+
+bool _isDirectReadArchive(String name) {
+  final lower = name.toLowerCase();
+  return lower.endsWith('.cbz') || lower.endsWith('.zip');
 }
 
 Future<Isolate> _runIsolate(
@@ -442,7 +469,9 @@ class PdfGenerator {
   Future<({int width, int height, Uint8List data})> _getImage(
     String imagePath,
   ) async {
-    var data = await File(imagePath).readAsBytes();
+    var data = imagePath.startsWith('localcbz://')
+        ? await LocalCbzReader.readReference(imagePath)
+        : await File(imagePath).readAsBytes();
     var image = await decodeImage(data);
     var width = image.width;
     var height = image.height;

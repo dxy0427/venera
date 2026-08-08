@@ -702,6 +702,8 @@ class _GalleryModeState extends State<_GalleryMode>
     if (imageKey == null) return null;
     if (imageKey.startsWith("file://")) {
       return await File(imageKey.substring(7)).readAsBytes();
+    } else if (imageKey.startsWith('localcbz://')) {
+      return loadSpecialImageBytes(imageKey);
     } else if (imageKey.startsWith('webdav://') ||
         imageKey.startsWith('stream://')) {
       final ref = WebDavResourceRef.parse(imageKey);
@@ -1301,6 +1303,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
     if (imageKey == null) return null;
     if (imageKey.startsWith("file://")) {
       return await File(imageKey.substring(7)).readAsBytes();
+    } else if (imageKey.startsWith('localcbz://')) {
+      return loadSpecialImageBytes(imageKey);
     } else if (imageKey.startsWith('webdav://') ||
         imageKey.startsWith('stream://')) {
       final ref = WebDavResourceRef.parse(imageKey);
@@ -1385,7 +1389,7 @@ void _preDownloadImage(int page, BuildContext context) {
   }
   var reader = context.reader;
   var imageKey = reader.images![page - 1];
-  if (imageKey.startsWith("file://")) {
+  if (imageKey.startsWith("file://") || imageKey.startsWith('localcbz://')) {
     return;
   }
   // WebDAV images are cached by WebDavProvider.loadImage

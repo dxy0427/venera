@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
@@ -54,6 +55,32 @@ void main() {
         ]);
 
         expect(result, ['1', '2', '3', '4']);
+      } finally {
+        await tmpRoot.delete(recursive: true);
+      }
+    });
+
+    test('returns direct-read archive chapters', () async {
+      final tmpRoot = await Directory.systemTemp.createTemp('cbz_test_');
+      try {
+        LocalManager().path = tmpRoot.path;
+        final comicDir = Directory('${tmpRoot.path}/grouped-dir');
+        await comicDir.create(recursive: true);
+        await _writeCbz(File('${comicDir.path}/1.cbz'), {
+          '001.jpg': [1, 2, 3],
+        });
+        final comic = _groupedComic(
+          grouped: const {
+            'Volume 1': {'1.cbz': '001'},
+          },
+          downloadedChapters: const ['1.cbz'],
+        );
+
+        final result = CBZ.collectAvailableChaptersForTesting(comic, const [
+          '1.cbz',
+        ]);
+
+        expect(result, ['1.cbz']);
       } finally {
         await tmpRoot.delete(recursive: true);
       }
@@ -300,5 +327,65 @@ void main() {
         await tmpRoot.delete(recursive: true);
       }
     });
+
+    test('exports pages from direct-read archive chapters', () async {
+      final tmpRoot = await Directory.systemTemp.createTemp('cbz_test_');
+      try {
+        App.dataPath = tmpRoot.path;
+        App.cachePath = '${tmpRoot.path}/cache';
+        await Directory(App.cachePath).create(recursive: true);
+        LocalManager().path = tmpRoot.path;
+        final outDir = '${tmpRoot.path}/out';
+        await Directory(outDir).create(recursive: true);
+        final comicDir = Directory('${tmpRoot.path}/flat-dir');
+        await comicDir.create(recursive: true);
+        await File('${comicDir.path}/cover.jpg').writeAsBytes([0]);
+        await _writeCbz(File('${comicDir.path}/chapter.cbz'), {
+          '001.jpg': [1, 2, 3],
+          '002.png': [4, 5, 6],
+        });
+        final comic = LocalComic(
+          id: 'archive-id',
+          title: 'Archive Comic',
+          subtitle: 'Author',
+          tags: const [],
+          directory: 'flat-dir',
+          chapters: const ComicChapters({'chapter.cbz': 'Chapter'}),
+          cover: 'cover.jpg',
+          comicType: ComicType.local,
+          downloadedChapters: const ['chapter.cbz'],
+          createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+        );
+        final capturedPages = <String, List<int>>{};
+        CBZ.compressor = (src, dst) async {
+          for (final entity in Directory(src).listSync().whereType<File>()) {
+            final name = entity.path.split('/').last;
+            if (RegExp(r'^\d{4}\.(jpg|png)$').hasMatch(name)) {
+              capturedPages[name] = entity.readAsBytesSync();
+            }
+          }
+          await File(dst).writeAsBytes([0]);
+        };
+
+        final result = await CBZ.exportByChapters(comic, outDir);
+
+        expect(result.errors, isEmpty);
+        expect(result.files, hasLength(1));
+        expect(capturedPages, {
+          '0001.jpg': [1, 2, 3],
+          '0002.png': [4, 5, 6],
+        });
+      } finally {
+        await tmpRoot.delete(recursive: true);
+      }
+    });
   });
+}
+
+Future<void> _writeCbz(File file, Map<String, List<int>> entries) async {
+  final archive = Archive();
+  for (final entry in entries.entries) {
+    archive.addFile(ArchiveFile(entry.key, entry.value.length, entry.value));
+  }
+  await file.writeAsBytes(ZipEncoder().encodeBytes(archive));
 }
