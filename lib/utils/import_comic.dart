@@ -542,18 +542,18 @@ class ImportComic {
         final destinationInfo = File(
           FilePath.join(destination.path, 'info.json'),
         );
-        final rawInfo = await sourceInfo.readAsString();
+        final rawInfo = utf8.decode(await sourceInfo.readAsBytes());
         try {
           final decoded = jsonDecode(rawInfo);
           if (decoded is Map) {
             final json = Map<String, dynamic>.from(decoded);
             json['cover'] = coverName;
-            await destinationInfo.writeAsString(jsonEncode(json));
+            await destinationInfo.writeAsBytes(utf8.encode(jsonEncode(json)));
           } else {
-            await destinationInfo.writeAsString(rawInfo);
+            await destinationInfo.writeAsBytes(utf8.encode(rawInfo));
           }
         } on FormatException {
-          await destinationInfo.writeAsString(rawInfo);
+          await destinationInfo.writeAsBytes(utf8.encode(rawInfo));
         }
       }
 

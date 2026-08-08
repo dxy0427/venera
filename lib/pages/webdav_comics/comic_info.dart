@@ -68,7 +68,7 @@ class ComicInfo {
   static Future<ComicInfo?> fromFile(File file) async {
     if (!await file.exists()) return null;
     try {
-      final content = await file.readAsString();
+      final content = utf8.decode(await file.readAsBytes());
       final json = jsonDecode(content) as Map<String, dynamic>;
       return fromJson(json);
     } catch (_) {

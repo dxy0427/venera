@@ -97,20 +97,18 @@ abstract final class LocalCbzReader {
 
   static Future<List<LocalCbzEntry>> listEntries(String archivePath) async {
     final file = File(archivePath);
-    final stat = await file.stat();
-    if (stat.type != FileSystemEntityType.file) {
+    if (!await file.exists()) {
       throw StateError('CBZ archive not found: $archivePath');
     }
+    final size = await file.length();
     final cached = _indexes[archivePath];
-    if (cached != null &&
-        cached.size == stat.size &&
-        cached.modified == stat.modified) {
+    if (cached != null && cached.size == size) {
       return cached.entries;
     }
     final pending = _indexRequests[archivePath];
     if (pending != null) return (await pending).entries;
 
-    final request = _parseIndex(file, stat);
+    final request = _parseIndex(file, size);
     _indexRequests[archivePath] = request;
     try {
       final index = await request;
@@ -127,10 +125,9 @@ abstract final class LocalCbzReader {
     }
   }
 
-  static Future<_ArchiveIndex> _parseIndex(File file, FileStat stat) async {
+  static Future<_ArchiveIndex> _parseIndex(File file, int size) async {
     final handle = await file.open();
     try {
-      final size = stat.size;
       final tailSize = size < 65557 ? size : 65557;
       final tailStart = size - tailSize;
       final tail = await _readAt(handle, tailStart, tailSize);
@@ -199,11 +196,7 @@ abstract final class LocalCbzReader {
         );
         position += 46 + fileNameLength + extraLength + commentLength;
       }
-      return _ArchiveIndex(
-        size: stat.size,
-        modified: stat.modified,
-        entries: List.unmodifiable(entries),
-      );
+      return _ArchiveIndex(size: size, entries: List.unmodifiable(entries));
     } finally {
       await handle.close();
     }
@@ -350,12 +343,7 @@ abstract final class LocalCbzReader {
 
 class _ArchiveIndex {
   final int size;
-  final DateTime modified;
   final List<LocalCbzEntry> entries;
 
-  const _ArchiveIndex({
-    required this.size,
-    required this.modified,
-    required this.entries,
-  });
+  const _ArchiveIndex({required this.size, required this.entries});
 }
