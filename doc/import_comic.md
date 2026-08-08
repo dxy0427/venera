@@ -20,7 +20,8 @@ the downloaded comics before running this.
 
 ## Comic Directory
 
-A directory considered as a comic directory only if it follows one of the following two types of structure:
+A directory is considered a comic directory when it follows one of the
+structures below.
 
 **Without Chapter**
 
@@ -65,19 +66,20 @@ The name of directory will be used as comic title. And the name of chapter direc
 
 ```
 comic_directory
-├── cover.[ext]
-├── info.json
+├── cover.[ext]       (optional)
+├── info.json         (optional)
 ├── chapter1.cbz
 ├── chapter2.cbz
 ├── final.cbz
 └── afterword.cbz
 ```
 
-Each archive is imported as one chapter. Archive extensions are removed from
-chapter names, and nested image folders inside an archive are flattened in
-path-aware natural order. This format must be copied to the app local path so
-the chapter archives can be extracted. Do not mix chapter directories and
-chapter archives in the same comic directory.
+Choose `Import Comics` -> `Archive chapter directory`. Each archive is imported
+as one chapter. Archive extensions are removed from chapter names, and nested
+image folders inside an archive are flattened in path-aware natural order. The
+app extracts this format into its local path automatically. If no cover is
+provided, the first image from the first chapter becomes `cover.[ext]`. Do not
+put chapter directories in an archive chapter directory.
 
 Optional `info.json` example:
 

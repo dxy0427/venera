@@ -70,7 +70,8 @@ void main() {
       await File('${nested.path}/001.jpg').writeAsBytes([1]);
     };
 
-    final comic = await const ImportComic().checkSingleComicForTesting(source);
+    final comic = await const ImportComic()
+        .checkArchiveChapterDirectoryForTesting(source);
 
     expect(comic, isNotNull);
     expect(comic!.title, 'Imported Comic');
@@ -98,17 +99,46 @@ void main() {
     expect(secondChapter, ['0001.jpg', '0002.jpg']);
   });
 
-  test('rejects a directory that mixes chapter folders and archives', () async {
+  test('generates a cover when cover and info.json are missing', () async {
+    await File('${source.path}/第1话.cbz').writeAsBytes([1]);
+
+    CBZ.extractor = (archive, out) async {
+      await File('${out.path}/001.webp').writeAsBytes([1, 2, 3]);
+      await File('${out.path}/002.webp').writeAsBytes([4, 5, 6]);
+    };
+
+    final comic = await const ImportComic()
+        .checkArchiveChapterDirectoryForTesting(source);
+
+    expect(comic, isNotNull);
+    expect(comic!.title, source.name);
+    expect(comic.cover, 'cover.webp');
+    expect(File('${comic.baseDir}/cover.webp').readAsBytesSync(), [1, 2, 3]);
+    expect(File('${comic.baseDir}/info.json').existsSync(), isFalse);
+    expect(comic.chapters!.allChapters, {'0': '第1话'});
+  });
+
+  test('ordinary directory import does not absorb archive chapters', () async {
+    await File('${source.path}/cover.jpg').writeAsBytes([0]);
+    await File('${source.path}/第1话.cbz').writeAsBytes([1]);
+
+    final comic = await const ImportComic().checkSingleComicForTesting(source);
+
+    expect(comic, isNull);
+  });
+
+  test('rejects chapter folders in an archive chapter directory', () async {
     await File('${source.path}/cover.jpg').writeAsBytes([0]);
     final chapter = await Directory('${source.path}/第1话').create();
     await File('${chapter.path}/001.jpg').writeAsBytes([1]);
     await File('${source.path}/第2话.cbz').writeAsBytes([2]);
 
     expect(
-      const ImportComic().checkSingleComicForTesting(source),
+      const ImportComic().checkArchiveChapterDirectoryForTesting(source),
       throwsA(
         predicate(
-          (error) => error.toString().contains('cannot mix chapter folders'),
+          (error) =>
+              error.toString().contains('cannot contain chapter folders'),
         ),
       ),
     );
