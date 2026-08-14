@@ -330,12 +330,11 @@ abstract final class LocalCbzReader {
     final result = Uint8List(length);
     var position = 0;
     while (position < length) {
-      final chunk = await file.read(length - position);
-      if (chunk.isEmpty) {
+      final count = await file.readInto(result, position, length);
+      if (count == 0) {
         throw const FormatException('Unexpected end of ZIP file');
       }
-      result.setRange(position, position + chunk.length, chunk);
-      position += chunk.length;
+      position += count;
     }
     return result;
   }

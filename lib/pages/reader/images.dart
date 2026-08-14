@@ -899,9 +899,19 @@ class _ContinuousModeState extends State<_ContinuousMode>
   }
 
   void cacheImages(int current) {
-    for (int i = current + 1; i <= current + preCacheCount; i++) {
+    final isLocalCbz =
+        reader.images!.isNotEmpty &&
+        reader.images!.first.startsWith('localcbz://');
+    // Large local archive pages should be decoded before they enter the
+    // viewport, but decoding several at once can overwhelm older devices.
+    final cacheCount = isLocalCbz ? 1 : preCacheCount;
+    for (int i = current + 1; i <= current + cacheCount; i++) {
       if (i <= reader.maxPage && !cached[i]) {
-        _preDownloadImage(i, context);
+        if (isLocalCbz) {
+          _precacheImage(i, context);
+        } else {
+          _preDownloadImage(i, context);
+        }
         cached[i] = true;
       }
     }

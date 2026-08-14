@@ -42,6 +42,26 @@ void main() {
     ]);
   });
 
+  test('reads a large stored CBZ entry without changing its bytes', () async {
+    final data = Uint8List(12 * 1024 * 1024);
+    for (var index = 0; index < data.length; index++) {
+      data[index] = index & 0xff;
+    }
+    final content = ArchiveFile.noCompress('001.jpg', data.length, data);
+    final archive = await File(
+      '${source.path}/large.cbz',
+    ).writeAsBytes(ZipEncoder().encodeBytes(Archive()..addFile(content)));
+
+    final images = await LocalCbzReader.listImages(archive.path);
+    expect(images.single.compressionMethod, 0);
+    final result = await LocalCbzReader.readEntry(
+      archive.path,
+      images.single.fileName,
+    );
+
+    expect(result, orderedEquals(data));
+  });
+
   test(
     'excludes an archive cover from chapter pages when other pages exist',
     () async {
