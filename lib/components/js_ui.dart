@@ -1,10 +1,13 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_qjs/flutter_qjs.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/js_engine.dart';
+import 'package:venera/network/cookie_jar.dart';
+import 'package:venera/pages/webview.dart';
 
 import 'components.dart';
 
@@ -55,7 +58,77 @@ mixin class JsUiApi {
           options.whereType<String>().toList(),
           initialIndex,
         );
+      case 'openWebView':
+        var url = message['url'];
+        if (url is! String || url.isEmpty) return false;
+        var checkLoginStatus = message['checkLoginStatus'];
+        if (checkLoginStatus != null && checkLoginStatus is! JSInvokable) {
+          return false;
+        }
+        var onLoginSuccess = message['onLoginSuccess'];
+        if (onLoginSuccess != null && onLoginSuccess is! JSInvokable) {
+          return false;
+        }
+        return _openWebView(
+          url,
+          checkLoginStatus == null ? null : checkLoginStatus as JSInvokable,
+          onLoginSuccess == null ? null : onLoginSuccess as JSInvokable,
+        );
     }
+  }
+
+  /// Opens a webview for cookie-based login, mirroring the built-in
+  /// "Login with webview" flow of comic sources. The JS source provides
+  /// [checkLoginStatus] (url, title) => bool and [onLoginSuccess] callbacks;
+  /// cookies seen by the webview are persisted to the app cookie jar so
+  /// subsequent Network requests carry them.
+  Future<bool> _openWebView(
+    String url,
+    JSInvokable? checkLoginStatus,
+    JSInvokable? onLoginSuccess,
+  ) async {
+    var checkFunc = checkLoginStatus == null
+        ? null
+        : JSAutoFreeFunction(checkLoginStatus);
+    var successFunc = onLoginSuccess == null
+        ? null
+        : JSAutoFreeFunction(onLoginSuccess);
+    var currentUrl = url;
+    var title = '';
+    var success = false;
+
+    void validate(InAppWebViewController c) async {
+      if (checkFunc == null) {
+        return;
+      }
+      var res = checkFunc.call([currentUrl, title]);
+      if (res is bool && res) {
+        var cookies = (await c.getCookies(currentUrl)) ?? [];
+        SingleInstanceCookieJar.instance?.saveFromResponse(
+          Uri.parse(currentUrl),
+          cookies,
+        );
+        success = true;
+        successFunc?.call([]);
+        App.mainNavigatorKey?.currentContext?.pop();
+      }
+    }
+
+    await App.rootContext.to(
+      () => AppWebview(
+        initialUrl: url,
+        onNavigation: (u, c) {
+          currentUrl = u;
+          validate(c);
+          return false;
+        },
+        onTitleChange: (t, c) {
+          title = t;
+          validate(c);
+        },
+      ),
+    );
+    return success;
   }
 
   Future<void> _showDialog(Map<String, dynamic> message) {

@@ -7,7 +7,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.4.1"
+    version = "1.5.0"
 
     minAppVersion = "1.5.3"
 
@@ -55,6 +55,14 @@ class Ehentai extends ComicSource {
             "Archive Bot API Address": "归档机器人API地址",
             "Archive Bot API Key": "归档机器人API密钥",
             "AR Bot Archive": "归档机器人",
+            "eh latest": "Eh主页",
+            "eh popular": "Eh热门",
+            "eh watched": "Eh关注",
+            "Login Verification": "登录验证",
+            "Online Verification": "在线验证",
+            "Online Verification (WebView)": "在线验证（WebView辅助）",
+            "Skip Verification": "跳过验证",
+            "Cloudflare challenge not passed": "未通过Cloudflare验证",
             "Archive Bot Auto Check-in": "归档机器人自动签到",
             "Balance": "余额",
         },
@@ -97,6 +105,14 @@ class Ehentai extends ComicSource {
             "Archive Bot API Address": "歸檔機器人API位址",
             "Archive Bot API Key": "歸檔機器人API金鑰",
             "AR Bot Archive": "歸檔機器人",
+            "eh latest": "Eh首頁",
+            "eh popular": "Eh熱門",
+            "eh watched": "Eh關注",
+            "Login Verification": "登入驗證",
+            "Online Verification": "線上驗證",
+            "Online Verification (WebView)": "線上驗證（WebView輔助）",
+            "Skip Verification": "跳過驗證",
+            "Cloudflare challenge not passed": "未通過Cloudflare驗證",
             "Archive Bot Auto Check-in": "歸檔機器人自動簽到",
             "Balance": "餘額",
         },
@@ -141,6 +157,11 @@ class Ehentai extends ComicSource {
             "AR Bot Archive": "AR Bot Archive",
             "Archive Bot Auto Check-in": "Archive Bot Auto Check-in",
             "Balance": "Balance",
+            "Login Verification": "Login Verification",
+            "Online Verification": "Online Verification",
+            "Online Verification (WebView)": "Online Verification (WebView)",
+            "Skip Verification": "Skip Verification",
+            "Cloudflare challenge not passed": "Cloudflare challenge not passed",
         },
     }
 
@@ -316,21 +337,54 @@ class Ehentai extends ComicSource {
                 if (values[0].length === 0 || values[1].length === 0) {
                     return false
                 }
-                let cookies = []
-                for (let i = 0; i < values.length; i++) {
-                    cookies.push(new Cookie({
-                        name: this.account.loginWithCookies.fields[i],
-                        value: values[i],
-                        domain: ".e-hentai.org"
-                    }))
-                    cookies.push(new Cookie({
-                        name: this.account.loginWithCookies.fields[i],
-                        value: values[i],
-                        domain: ".exhentai.org"
-                    }))
+                let applyCookies = () => {
+                    let cookies = []
+                    for (let i = 0; i < values.length; i++) {
+                        if (values[i].length === 0) {
+                            continue
+                        }
+                        cookies.push(new Cookie({
+                            name: this.account.loginWithCookies.fields[i],
+                            value: values[i],
+                            domain: ".e-hentai.org"
+                        }))
+                        cookies.push(new Cookie({
+                            name: this.account.loginWithCookies.fields[i],
+                            value: values[i],
+                            domain: ".exhentai.org"
+                        }))
+                    }
+                    Network.deleteCookies('https://e-hentai.org')
+                    Network.setCookies('https://e-hentai.org', cookies)
                 }
-                Network.deleteCookies('https://e-hentai.org')
-                Network.setCookies('https://e-hentai.org', cookies)
+                // Ask the user how to verify, mirroring JHenTai's login page.
+                let verifyType = await UI.showSelectDialog(
+                    this.translate("Login Verification"),
+                    [
+                        this.translate("Online Verification"),
+                        this.translate("Online Verification (WebView)"),
+                        this.translate("Skip Verification"),
+                    ],
+                    0,
+                )
+                if (verifyType === 1) {
+                    // WebView assisted: pass the Cloudflare challenge first,
+                    // then verify online.
+                    let ok = await UI.openWebView(
+                        "https://forums.e-hentai.org/",
+                        (url, title) => title === "E-Hentai Forums",
+                        () => { },
+                    )
+                    if (!ok) {
+                        UI.showMessage(this.translate("Cloudflare challenge not passed"))
+                        return false
+                    }
+                } else if (verifyType === 2) {
+                    // Skip verification: apply the cookies as-is.
+                    applyCookies()
+                    return true
+                }
+                applyCookies()
                 let res = await Network.get(
                     "https://forums.e-hentai.org/",
                     {

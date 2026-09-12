@@ -49,6 +49,16 @@ void main() {
                 '"archive_url":"https://example.hath.network/archive/x.zip"}}',
             "error": null,
           });
+        case 'UI':
+          // The verification dialog returns the user's choice; default to
+          // online verification in tests.
+          if (message['function'] == 'showSelectDialog') {
+            return Future.value(0);
+          }
+          if (message['function'] == 'openWebView') {
+            return Future.value(false);
+          }
+          return null;
         default:
           return null;
       }
@@ -110,6 +120,26 @@ void main() {
       expect(
         engine!.evaluate("this['temp'].translation['zh_CN']['Yesterday']"),
         '昨日',
+      );
+
+      // Explore page titles and the verification dialog are localized.
+      expect(
+        engine!.evaluate("this['temp'].translation['zh_CN']['eh latest']"),
+        'Eh主页',
+      );
+      expect(
+        engine!.evaluate(
+          "this['temp'].translation['zh_CN']['Online Verification (WebView)']",
+        ),
+        '在线验证（WebView辅助）',
+      );
+
+      // The cookie login dialog exists and its three options are translated.
+      expect(
+        engine!.evaluate(
+          "typeof this['temp'].account.loginWithCookies.validate === 'function'",
+        ),
+        isTrue,
       );
 
       // Archive bot settings and functions must exist.

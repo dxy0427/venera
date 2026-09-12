@@ -1383,6 +1383,25 @@ let UI = {
     },
 
     /**
+     * Open a webview for cookie-based login (e.g. to pass a Cloudflare
+     * challenge before verifying cookies).
+     * @param url {string} - the initial url
+     * @param checkLoginStatus {(url: string, title: string) => boolean} - return true when the page indicates a successful login
+     * @param onLoginSuccess {() => void | Promise<void>} - called once after a successful login; cookies seen by the webview are saved automatically
+     * @returns {Promise<boolean>} - whether the login succeeded
+     * @since 1.6.0
+     */
+    openWebView: (url, checkLoginStatus, onLoginSuccess) => {
+        return sendMessage({
+            method: 'UI',
+            function: 'openWebView',
+            url: url,
+            checkLoginStatus: checkLoginStatus,
+            onLoginSuccess: onLoginSuccess,
+        })
+    },
+
+    /**
      * Show a loading dialog.
      * @param onCancel {() => void | null | undefined} - Called when the loading dialog is canceled. If [onCancel] is null, the dialog cannot be canceled by the user.
      * @returns {number} - A number that can be used to cancel the loading dialog.
