@@ -7,7 +7,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.4.0"
+    version = "1.4.1"
 
     minAppVersion = "1.5.3"
 
@@ -45,13 +45,8 @@ class Ehentai extends ComicSource {
             "Category": "分类",
             "Min Stars": "最少星星",
             "Language": "语言",
-            "H@H Original": "H@H 原版",
-            "H@H 800x": "H@H 800x",
-            "H@H 1280x": "H@H 1280x", 
-            "H@H 1920x": "H@H 1920x",
-            "H@H 2560x": "H@H 2560x",
-            "Original": "原版",
-            "Resample": "重采样",
+            "Original": "原图",
+            "Resample": "压缩",
             "Yesterday": "昨日",
             "Monthly": "本月",
             "Yearly": "年度",
@@ -59,7 +54,7 @@ class Ehentai extends ComicSource {
             "Archive Bot Type": "归档机器人类型",
             "Archive Bot API Address": "归档机器人API地址",
             "Archive Bot API Key": "归档机器人API密钥",
-            "AR Bot Archive": "归档机器人下载",
+            "AR Bot Archive": "归档机器人",
             "Archive Bot Auto Check-in": "归档机器人自动签到",
             "Balance": "余额",
         },
@@ -92,13 +87,8 @@ class Ehentai extends ComicSource {
             "Category": "分類",
             "Min Stars": "最少星星",
             "Language": "語言",
-            "H@H Original": "H@H 原版",
-            "H@H 800x": "H@H 800x",
-            "H@H 1280x": "H@H 1280x",
-            "H@H 1920x": "H@H 1920x", 
-            "H@H 2560x": "H@H 2560x", 
-            "Original": "原版",
-            "Resample": "重採樣",
+            "Original": "原图",
+            "Resample": "壓縮",
             "Yesterday": "昨日",
             "Monthly": "本月",
             "Yearly": "年度",
@@ -106,7 +96,7 @@ class Ehentai extends ComicSource {
             "Archive Bot Type": "歸檔機器人類型",
             "Archive Bot API Address": "歸檔機器人API位址",
             "Archive Bot API Key": "歸檔機器人API金鑰",
-            "AR Bot Archive": "歸檔機器人下載",
+            "AR Bot Archive": "歸檔機器人",
             "Archive Bot Auto Check-in": "歸檔機器人自動簽到",
             "Balance": "餘額",
         },
@@ -139,11 +129,6 @@ class Ehentai extends ComicSource {
             "Category": "Category",
             "Min Stars": "Min Stars",
             "Language": "Language",
-            "H@H Original": "H@H Original",
-            "H@H 800x": "H@H 800x",
-            "H@H 1280x": "H@H 1280x",
-            "H@H 1920x": "H@H 1920x",
-            "H@H 2560x": "H@H 2560x",
             "Original": "Original",
             "Resample": "Resample",
             "Yesterday": "Yesterday",
@@ -1410,7 +1395,7 @@ class Ehentai extends ComicSource {
                                 
                                 archives.push({
                                     id: `h@h_${resolution}`,
-                                    title: `H@H ${linkText}`,
+                                    title: `H@H ${this.translate(linkText)}`,
                                     description: `Size: ${size}, Cost: ${cost}`,
                                 });
                             }
@@ -1427,7 +1412,7 @@ class Ehentai extends ComicSource {
                                     let resolutionText = paragraphs[0].text;
                                     archives.push({
                                         id: `h@h_${resolutionText.toLowerCase().replace('x', '')}`,
-                                        title: `H@H ${resolutionText}`,
+                                        title: `H@H ${this.translate(resolutionText)}`,
                                         description: `Cost: ${cost}, Size: ${size}`,
                                     });
                                 }
@@ -1444,7 +1429,7 @@ class Ehentai extends ComicSource {
                     let originSize = origin.querySelector("p > strong")?.text || "Unknown";
                     archives.push({
                         id: '0',
-                        title: 'Original',
+                        title: this.translate('Original'),
                         description: `Cost: ${originCost}, Size: ${originSize}`,
                     });
                 }
@@ -1456,7 +1441,7 @@ class Ehentai extends ComicSource {
                     let resampleSize = resample.querySelector("p > strong")?.text || "Unknown";
                     archives.push({
                         id: '1',
-                        title: 'Resample',
+                        title: this.translate('Resample'),
                         description: `Cost: ${resampleCost}, Size: ${resampleSize}`,
                     });
                 }
