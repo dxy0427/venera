@@ -7,7 +7,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.5.1"
+    version = "1.5.2"
 
     minAppVersion = "1.5.3"
 
@@ -60,9 +60,7 @@ class Ehentai extends ComicSource {
             "eh watched": "Eh关注",
             "Login Verification": "登录验证",
             "Online Verification": "在线验证",
-            "Online Verification (WebView)": "在线验证（WebView辅助）",
             "Skip Verification": "跳过验证",
-            "Cloudflare challenge not passed": "未通过Cloudflare验证",
             "Archive Bot Auto Check-in": "归档机器人自动签到",
             "Balance": "余额",
         },
@@ -110,9 +108,7 @@ class Ehentai extends ComicSource {
             "eh watched": "Eh關注",
             "Login Verification": "登入驗證",
             "Online Verification": "線上驗證",
-            "Online Verification (WebView)": "線上驗證（WebView輔助）",
             "Skip Verification": "跳過驗證",
-            "Cloudflare challenge not passed": "未通過Cloudflare驗證",
             "Archive Bot Auto Check-in": "歸檔機器人自動簽到",
             "Balance": "餘額",
         },
@@ -159,9 +155,7 @@ class Ehentai extends ComicSource {
             "Balance": "Balance",
             "Login Verification": "Login Verification",
             "Online Verification": "Online Verification",
-            "Online Verification (WebView)": "Online Verification (WebView)",
             "Skip Verification": "Skip Verification",
-            "Cloudflare challenge not passed": "Cloudflare challenge not passed",
         },
     }
 
@@ -365,24 +359,11 @@ class Ehentai extends ComicSource {
                     this.translate("Login Verification"),
                     [
                         this.translate("Online Verification"),
-                        this.translate("Online Verification (WebView)"),
                         this.translate("Skip Verification"),
                     ],
                     0,
                 )
                 if (verifyType === 1) {
-                    // WebView assisted: pass the Cloudflare challenge first,
-                    // then verify online.
-                    let ok = await UI.openWebView(
-                        "https://forums.e-hentai.org/",
-                        (url, title) => title === "E-Hentai Forums",
-                        () => { },
-                    )
-                    if (!ok) {
-                        UI.showMessage(this.translate("Cloudflare challenge not passed"))
-                        return false
-                    }
-                } else if (verifyType === 2) {
                     // Skip verification: apply the cookies as-is.
                     applyCookies()
                     return true

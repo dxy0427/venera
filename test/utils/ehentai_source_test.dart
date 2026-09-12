@@ -69,9 +69,6 @@ void main() {
           if (message['function'] == 'showSelectDialog') {
             return Future.value(0);
           }
-          if (message['function'] == 'openWebView') {
-            return Future.value(false);
-          }
           return null;
         case 'html':
           // Mirror _JSEngineApi.handleHtmlCallback document accounting and
@@ -174,12 +171,12 @@ void main() {
       );
       expect(
         engine!.evaluate(
-          "this['temp'].translation['zh_CN']['Online Verification (WebView)']",
+          "this['temp'].translation['zh_CN']['Skip Verification']",
         ),
-        '在线验证（WebView辅助）',
+        '跳过验证',
       );
 
-      // The cookie login dialog exists and its three options are translated.
+      // The cookie login dialog exists and is translated.
       expect(
         engine!.evaluate(
           "typeof this['temp'].account.loginWithCookies.validate === 'function'",
