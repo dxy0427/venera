@@ -328,7 +328,9 @@ class __DNSOverridesState extends State<_DNSOverrides> {
               label: Text("Add".tl),
             ),
             Text(
-              "Tap the icon to disable SNI for that domain, bypassing SNI-based blocking."
+              "Tap the icon to disable SNI for that domain, bypassing "
+                      "SNI-based blocking. Certificate verification is skipped "
+                      "for it too."
                   .tl,
               style: TextStyle(
                 fontSize: 12,

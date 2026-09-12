@@ -194,6 +194,11 @@ class RHttpAdapter implements HttpClientAdapter {
     final overrides = getDnsOverrides();
     final noSniDomains = getNoSniDomains();
     final host = options.uri.host;
+    // Domain fronting: connect to the override IP without SNI. The override
+    // server's certificate does not match the original hostname (e.g. the
+    // site's own servers present their main certificate for any host), so
+    // certificate verification is skipped for these domains only.
+    final fronting = overrides.containsKey(host) && noSniDomains.contains(host);
 
     return rhttp.ClientSettings(
       proxySettings: proxy == null
@@ -214,8 +219,9 @@ class RHttpAdapter implements HttpClientAdapter {
       tlsSettings: rhttp.TlsSettings(
         // The domain name is not sent in the TLS handshake only for domains
         // marked in the DNS overrides, so other sources are unaffected.
-        sni: !(overrides.containsKey(host) && noSniDomains.contains(host)),
-        verifyCertificates: appdata.settings['ignoreBadCertificate'] != true,
+        sni: !fronting,
+        verifyCertificates:
+            !fronting && appdata.settings['ignoreBadCertificate'] != true,
       ),
     );
   }
