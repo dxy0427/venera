@@ -110,10 +110,7 @@ class FileDownloader {
     try {
       var proxy = await getProxy();
       _dio.httpClientAdapter = IOHttpClientAdapter(
-        createHttpClient: () {
-          return HttpClient()
-            ..findProxy = (uri) => proxy == null ? "DIRECT" : "PROXY $proxy";
-        },
+        createHttpClient: () => createDartIoHttpClient(proxy),
       );
 
       // get file size

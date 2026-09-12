@@ -235,15 +235,17 @@ class _DNSOverrides extends StatefulWidget {
 }
 
 class __DNSOverridesState extends State<_DNSOverrides> {
-  var overrides = <(TextEditingController, TextEditingController)>[];
+  var overrides = <(TextEditingController, TextEditingController, bool)>[];
 
   @override
   void initState() {
+    var noSniDomains = RHttpAdapter.getNoSniDomains();
     for (var entry in (appdata.settings['dnsOverrides'] as Map).entries) {
       if (entry.key is String && entry.value is String) {
         overrides.add((
           TextEditingController(text: entry.key),
           TextEditingController(text: entry.value),
+          noSniDomains.contains(entry.key),
         ));
       }
     }
@@ -261,12 +263,19 @@ class __DNSOverridesState extends State<_DNSOverrides> {
 
   Future<void> _save() async {
     var map = <String, String>{};
+    var noSniDomains = <String>[];
     for (var entry in overrides) {
       if (entry.$1.text.isNotEmpty && entry.$2.text.isNotEmpty) {
         map[entry.$1.text] = entry.$2.text;
+        if (entry.$3) {
+          noSniDomains.add(entry.$1.text);
+        }
       }
     }
     appdata.settings['dnsOverrides'] = map;
+    appdata.settings['dnsOverridesNoSni'] = noSniDomains;
+    // The legacy global switch no longer applies once per-domain flags exist.
+    appdata.settings['sni'] = true;
     await appdata.saveData();
     JsEngine().resetDio();
   }
@@ -280,7 +289,7 @@ class __DNSOverridesState extends State<_DNSOverrides> {
           onPressed: () async {
             await _save();
             if (context.mounted) {
-              context.pop();
+              App.rootContext.pop();
             }
           },
           icon: const Icon(Icons.save),
@@ -293,8 +302,10 @@ class __DNSOverridesState extends State<_DNSOverrides> {
             _SwitchSetting(
               title: "Enable DNS Overrides".tl,
               settingKey: "enableDnsOverrides",
+              subtitle:
+                  "Map the specified domains to the given IP addresses for all requests."
+                      .tl,
             ),
-            _SwitchSetting(title: "Server Name Indication", settingKey: "sni"),
             const SizedBox(height: 8),
             Container(
               height: 1,
@@ -309,12 +320,21 @@ class __DNSOverridesState extends State<_DNSOverrides> {
                   overrides.add((
                     TextEditingController(),
                     TextEditingController(),
+                    false,
                   ));
                 });
               },
               icon: const Icon(Icons.add),
               label: Text("Add".tl),
             ),
+            Text(
+              "Tap the icon to disable SNI for that domain, bypassing SNI-based blocking."
+                  .tl,
+              style: TextStyle(
+                fontSize: 12,
+                color: context.colorScheme.outline,
+              ),
+            ).paddingHorizontal(24).paddingBottom(8),
           ],
         ),
       ),
@@ -356,6 +376,18 @@ class __DNSOverridesState extends State<_DNSOverrides> {
             ).paddingHorizontal(8),
           ),
           Container(width: 1, color: context.colorScheme.outlineVariant),
+          IconButton(
+            tooltip: entry.$3
+                ? "Enable SNI for this domain".tl
+                : "Disable SNI for this domain".tl,
+            icon: Icon(entry.$3 ? Icons.visibility_off : Icons.visibility),
+            color: entry.$3 ? context.colorScheme.outline : null,
+            onPressed: () {
+              setState(() {
+                overrides[index] = (entry.$1, entry.$2, !entry.$3);
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () {

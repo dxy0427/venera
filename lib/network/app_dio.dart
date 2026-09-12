@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
@@ -190,6 +191,9 @@ class RHttpAdapter implements HttpClientAdapter {
     final redirects = options.followRedirects
         ? const rhttp.RedirectSettings.limited(5)
         : const rhttp.RedirectSettings.none();
+    final overrides = getDnsOverrides();
+    final noSniDomains = getNoSniDomains();
+    final host = options.uri.host;
 
     return rhttp.ClientSettings(
       proxySettings: proxy == null
@@ -202,26 +206,53 @@ class RHttpAdapter implements HttpClientAdapter {
         keepAlivePing: Duration(seconds: 30),
       ),
       throwOnStatusCode: false,
-      dnsSettings: rhttp.DnsSettings.static(overrides: _getOverrides()),
+      dnsSettings: rhttp.DnsSettings.static(
+        overrides: {
+          for (var entry in overrides.entries) entry.key: [entry.value],
+        },
+      ),
       tlsSettings: rhttp.TlsSettings(
-        sni: appdata.settings['sni'] != false,
+        // The domain name is not sent in the TLS handshake only for domains
+        // marked in the DNS overrides, so other sources are unaffected.
+        sni: !(overrides.containsKey(host) && noSniDomains.contains(host)),
         verifyCertificates: appdata.settings['ignoreBadCertificate'] != true,
       ),
     );
   }
 
-  static Map<String, List<String>> _getOverrides() {
-    if (!appdata.settings['enableDnsOverrides'] == true) {
+  static Map<String, String> getDnsOverrides() {
+    if (appdata.settings['enableDnsOverrides'] != true) {
       return {};
     }
     var config = appdata.settings["dnsOverrides"];
-    var result = <String, List<String>>{};
+    var result = <String, String>{};
     if (config is Map) {
       for (var entry in config.entries) {
         if (entry.key is String && entry.value is String) {
-          result[entry.key] = [entry.value];
+          result[entry.key] = entry.value;
         }
       }
+    }
+    return result;
+  }
+
+  /// Domains whose name should not be sent in the TLS handshake (SNI),
+  /// e.g. to bypass SNI-based blocking of a DNS override entry.
+  static Set<String> getNoSniDomains() {
+    var result = <String>{};
+    var config = appdata.settings['dnsOverridesNoSni'];
+    if (config is List) {
+      for (var domain in config) {
+        if (domain is String) {
+          result.add(domain);
+        }
+      }
+      return result;
+    }
+    // Saved before the per-domain option existed: fall back to the legacy
+    // global switch, which applied to all overridden domains.
+    if (appdata.settings['sni'] == false) {
+      result.addAll(getDnsOverrides().keys);
     }
     return result;
   }
@@ -268,7 +299,8 @@ class RHttpAdapter implements HttpClientAdapter {
       res.body,
       code,
       statusMessage: _getStatusMessage(code),
-      isRedirect: code == 301 ||
+      isRedirect:
+          code == 301 ||
           code == 302 ||
           code == 303 ||
           code == 307 ||
@@ -296,4 +328,71 @@ class RHttpAdapter implements HttpClientAdapter {
       _ => "Invalid Status Code $statusCode",
     };
   }
+}
+
+/// Creates a dart:io [HttpClient] which applies the app's network settings:
+/// the proxy, DNS overrides, per-domain SNI bypass and certificate
+/// verification.
+///
+/// JS comic sources can request the dart:io HTTP stack with the
+/// "http_client": "dart:io" request header. Without this factory, those
+/// requests would ignore the settings above, since they bypass [RHttpAdapter].
+HttpClient createDartIoHttpClient(String? proxy) {
+  var client = HttpClient()
+    ..findProxy = (uri) => proxy == null ? "DIRECT" : "PROXY $proxy";
+  var ignoreBadCertificate = appdata.settings['ignoreBadCertificate'] == true;
+  var overrides = RHttpAdapter.getDnsOverrides();
+  var noSniDomains = RHttpAdapter.getNoSniDomains();
+  if (overrides.isEmpty) {
+    if (ignoreBadCertificate) {
+      client.badCertificateCallback = (cert, host, port) => true;
+    }
+    return client;
+  }
+  client.connectionFactory = (uri, proxyHost, proxyPort) async {
+    if (proxyHost != null) {
+      // The HTTP client performs the TLS handshake itself after the
+      // proxy tunnel has been established.
+      var task = await Socket.startConnect(proxyHost, proxyPort ?? 80);
+      return ConnectionTask.fromSocket(task.socket, task.cancel);
+    }
+    var port = uri.port;
+    var override = overrides[uri.host];
+    if (uri.scheme != "https") {
+      var task = await Socket.startConnect(override ?? uri.host, port);
+      return ConnectionTask.fromSocket(task.socket, task.cancel);
+    }
+    bool Function(X509Certificate)? onBadCertificate = ignoreBadCertificate
+        ? (_) => true
+        : null;
+    if (override == null) {
+      var task = await SecureSocket.startConnect(
+        uri.host,
+        port,
+        onBadCertificate: onBadCertificate,
+      );
+      return ConnectionTask.fromSocket(task.socket, task.cancel);
+    }
+    var task = await Socket.startConnect(override, port);
+    Future<SecureSocket> socket;
+    if (noSniDomains.contains(uri.host)) {
+      // Bypass SNI: the domain name is not sent in the TLS handshake.
+      // dart:io cannot omit the SNI extension, so the override IP is sent
+      // instead (rhttp sends no SNI at all). The certificate cannot match
+      // the IP address, so it is not verified.
+      socket = task.socket.then(
+        (socket) => SecureSocket.secure(socket, onBadCertificate: (_) => true),
+      );
+    } else {
+      socket = task.socket.then(
+        (socket) => SecureSocket.secure(
+          socket,
+          host: uri.host,
+          onBadCertificate: onBadCertificate,
+        ),
+      );
+    }
+    return ConnectionTask.fromSocket(socket, task.cancel);
+  };
+  return client;
 }

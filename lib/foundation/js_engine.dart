@@ -241,10 +241,7 @@ class JsEngine with _JSEngineApi, JsUiApi, Init {
         );
         var proxy = await getProxy();
         dio.httpClientAdapter = IOHttpClientAdapter(
-          createHttpClient: () {
-            return HttpClient()
-              ..findProxy = (uri) => proxy == null ? "DIRECT" : "PROXY $proxy";
-          },
+          createHttpClient: () => createDartIoHttpClient(proxy),
         );
         dio.interceptors.add(
           CookieManagerSql(SingleInstanceCookieJar.instance!),
