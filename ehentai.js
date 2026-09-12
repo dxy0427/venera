@@ -7,7 +7,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.5.0"
+    version = "1.5.1"
 
     minAppVersion = "1.5.3"
 
@@ -281,13 +281,16 @@ class Ehentai extends ComicSource {
         const document = new HtmlDocument(res.body);
         const eventPane = document.getElementById("eventpane");
         if (eventPane == null) {
+            document.dispose();
             return;
         }
         const dawnInfo = eventPane.querySelector("div > p:nth-child(2)");
         if (dawnInfo == null) {
+            document.dispose();
             return;
         }
         UI.showMessage(dawnInfo.text);
+        document.dispose();
     }
 
     // [Optional] account related
@@ -634,6 +637,7 @@ class Ehentai extends ComicSource {
 
         let nextButton = document.querySelector("a#dnext");
         let next = nextButton?.attributes["href"]
+        document.dispose()
 
         return {
             comics: galleries,
@@ -1171,15 +1175,16 @@ class Ehentai extends ComicSource {
             if(script) {
                 let reg = RegExp("showkey=\"(.*?)\"", "g");
                 let match = reg.exec(script.text)
+                document.dispose()
                 return {
                     'showkey': match[1]
                 }
             }
             script = document.querySelectorAll("script").find((e) => e.text.includes("mpvkey"))?.text;
-            document.dispose()
             if(script) {
                 let mpvkey = script.split(';').find((e) => e.includes("mpvkey")).replaceAll(' ', '').split('=')[1].replaceAll('"', '');
                 let imageList = script.split(';').find((e) => e.includes("imagelist")).replaceAll(' ', '').split('=')[1];
+                document.dispose()
                 return {
                     'mpvkey': mpvkey,
                     'imageKeys': JSON.parse(imageList).map((e) => e["k"])
@@ -1376,8 +1381,11 @@ class Ehentai extends ComicSource {
             }
             let document = new HtmlDocument(res.body)
             if(document.querySelector('p.br')) {
-                throw document.querySelector('p.br').text
+                let errorText = document.querySelector('p.br').text
+                document.dispose()
+                throw errorText
             }
+            document.dispose()
             return 'ok'
         },
         /**
