@@ -102,7 +102,10 @@ class CacheManager {
       final dir = Directory(p);
       if (!await dir.exists()) continue;
       try {
-        await for (final entity in dir.list(recursive: true, followLinks: false)) {
+        await for (final entity in dir.list(
+          recursive: true,
+          followLinks: false,
+        )) {
           if (entity is File) {
             total += await entity.length();
           }
@@ -322,9 +325,14 @@ class CacheManager {
     var name = row['name'] as String;
     var file = File('$cachePath/$dir/$name');
     var fileSize = 0;
-    if (await file.exists()) {
-      fileSize = await file.length();
-      await file.delete();
+    try {
+      if (await file.exists()) {
+        fileSize = await file.length();
+        await file.delete();
+      }
+    } on FileSystemException {
+      // A concurrent delete of the same key may have removed the file
+      // between the exists check and this call.
     }
     _db.execute(
       '''
