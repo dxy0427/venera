@@ -7,7 +7,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.3.1"
+    version = "1.4.0"
 
     minAppVersion = "1.5.3"
 
@@ -60,6 +60,8 @@ class Ehentai extends ComicSource {
             "Archive Bot API Address": "归档机器人API地址",
             "Archive Bot API Key": "归档机器人API密钥",
             "AR Bot Archive": "归档机器人下载",
+            "Archive Bot Auto Check-in": "归档机器人自动签到",
+            "Balance": "余额",
         },
         'zh_TW': {
             'domain': '域名',
@@ -105,6 +107,8 @@ class Ehentai extends ComicSource {
             "Archive Bot API Address": "歸檔機器人API位址",
             "Archive Bot API Key": "歸檔機器人API金鑰",
             "AR Bot Archive": "歸檔機器人下載",
+            "Archive Bot Auto Check-in": "歸檔機器人自動簽到",
+            "Balance": "餘額",
         },
         'en_US': {
             "domain": "Domain",
@@ -150,6 +154,8 @@ class Ehentai extends ComicSource {
             "Archive Bot API Address": "Archive Bot API Address",
             "Archive Bot API Key": "Archive Bot API Key",
             "AR Bot Archive": "AR Bot Archive",
+            "Archive Bot Auto Check-in": "Archive Bot Auto Check-in",
+            "Balance": "Balance",
         },
     }
 
@@ -177,6 +183,76 @@ class Ehentai extends ComicSource {
             id: id,
             token: token
         }
+    }
+
+    /**
+     * Get the archive bot configuration from settings.
+     * @returns {{apiKey: string, botType: string, address: string}|null}
+     */
+    getArbotConfig() {
+        let apiKey = this.loadSetting("archiveBotApiKey")
+        if (!apiKey) {
+            return null;
+        }
+        let botType = this.loadSetting("archiveBotType") ?? "ehArBot";
+        let address = this.loadSetting("archiveBotAddress");
+        if (!address) {
+            address = botType === 'ehArBot'
+                ? "https://ehbot-api.ntr.you"
+                : "https://api.archive-at-home.org/jhentai";
+        }
+        if (address.endsWith("/")) {
+            address = address.substring(0, address.length - 1);
+        }
+        return { apiKey, botType, address };
+    }
+
+    /**
+     * Send a request to the archive bot API.
+     * @param path {string}
+     * @param body {Object}
+     * @returns {Promise<{status: number, json: Object|null}>}
+     */
+    async arbotRequest(path, body) {
+        let config = this.getArbotConfig();
+        let headers = { "Content-Type": "application/json" };
+        if (config.botType === 'archiveAtHome') {
+            headers["Authorization"] = `Bearer ${config.apiKey}`;
+            headers["X-Client"] = "app/jhentai";
+        } else {
+            body['apikey'] = config.apiKey;
+        }
+        let res = await Network.post(`${config.address}${path}`, headers, body);
+        let json = null;
+        try {
+            json = JSON.parse(res.body);
+        } catch (e) { /* non-json body */ }
+        return { status: res.status, json: json };
+    }
+
+    /**
+     * Called when the app starts. Performs the archive bot daily check-in
+     * if enabled.
+     */
+    init() {
+        if (this.loadSetting("archiveBotAutoCheckin") !== true) {
+            return;
+        }
+        if (!this.getArbotConfig()) {
+            return;
+        }
+        let today = new Date().toISOString().split("T")[0];
+        if (this.loadData("lastArbotCheckin") == today) {
+            return;
+        }
+        this.arbotRequest("/checkin", {}).then((res) => {
+            // 0 = success, 7 = already checked in today
+            if (res.status === 200 && (res.json?.code === 0 || res.json?.code === 7)) {
+                this.saveData("lastArbotCheckin", today);
+            }
+        }).catch((e) => {
+            console.log("Archive bot check-in failed: " + e);
+        });
     }
 
     async checkEHEvent() {
@@ -1386,12 +1462,22 @@ class Ehentai extends ComicSource {
                 }
                 
                 // Archive bot entry (EH-ArBot / Archive@Home)
-                if (this.loadSetting("archiveBotApiKey")) {
+                if (this.getArbotConfig()) {
                     let botType = this.loadSetting("archiveBotType") ?? "ehArBot";
+                    let typeName = botType === 'ehArBot' ? 'EH-ArBot' : 'Archive@Home';
+                    let description = typeName;
+                    try {
+                        let balance = await this.arbotRequest("/balance", {});
+                        let currentGP = balance?.json?.data?.current_GP
+                            ?? balance?.json?.data?.balance;
+                        if (currentGP != null) {
+                            description = `${typeName} | ${this.translate("Balance")}: ${currentGP} GP`;
+                        }
+                    } catch (e) { /* keep type-only description */ }
                     archives.push({
                         id: 'arbot',
                         title: this.translate("AR Bot Archive"),
-                        description: botType === 'ehArBot' ? 'EH-ArBot' : 'Archive@Home',
+                        description: description,
                     });
                 }
                 
@@ -1405,44 +1491,34 @@ class Ehentai extends ComicSource {
                 
                 // Archive bot download (EH-ArBot / Archive@Home)
                 if (aid === 'arbot') {
-                    let apiKey = this.loadSetting("archiveBotApiKey")
-                    let botType = this.loadSetting("archiveBotType") ?? "ehArBot"
-                    let address = this.loadSetting("archiveBotAddress")
-                    if (!address) {
-                        address = botType === 'ehArBot'
-                            ? "https://ehbot-api.ntr.you"
-                            : "https://api.archive-at-home.org/jhentai"
+                    let config = this.getArbotConfig();
+                    if (!config) {
+                        throw "Archive bot API key is not configured"
                     }
-                    if (address.endsWith("/")) {
-                        address = address.substring(0, address.length - 1)
-                    }
-                    let res
-                    if (botType === 'ehArBot') {
-                        res = await Network.post(`${address}/resolve`, {
-                            "Content-Type": "application/json",
-                        }, {
-                            'apikey': apiKey,
+                    let body
+                    if (config.botType === 'ehArBot') {
+                        body = {
                             'gid': Number(gid),
                             'token': token,
                             'force_resolve': false,
-                        })
+                        }
                     } else {
-                        res = await Network.post(`${address}/api/v1/parse`, {
-                            "Content-Type": "application/json",
-                            "Authorization": `Bearer ${apiKey}`,
-                            "X-Client": "app/jhentai",
-                        }, {
+                        body = {
                             'gallery_id': String(gid),
                             'gallery_key': token,
                             'force': false,
-                        })
+                        }
                     }
+                    let res = await this.arbotRequest(
+                        config.botType === 'ehArBot' ? "/resolve" : "/api/v1/parse",
+                        body,
+                    )
                     if (res.status !== 200) {
                         throw `Archive bot error: ${res.status}`
                     }
-                    let json = JSON.parse(res.body)
-                    if (json.code !== 0 || !json.data || !json.data.archive_url) {
-                        throw json.msg ?? "Archive bot request failed"
+                    let json = res.json
+                    if (json == null || json.code !== 0 || !json.data || !json.data.archive_url) {
+                        throw json?.msg ?? "Archive bot request failed"
                     }
                     return json.data.archive_url
                 }
@@ -1666,6 +1742,11 @@ class Ehentai extends ComicSource {
             title: "Archive Bot API Key",
             type: "input",
             default: "",
+        },
+        archiveBotAutoCheckin: {
+            title: "Archive Bot Auto Check-in",
+            type: "switch",
+            default: false
         },
     }
 

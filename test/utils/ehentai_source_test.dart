@@ -20,6 +20,12 @@ void main() {
 
   FlutterQjs? engine;
 
+  final settings = <String, dynamic>{
+    'archiveBotApiKey': 'test-key',
+    'archiveBotAutoCheckin': true,
+  };
+  final savedData = <String, dynamic>{};
+
   Object? messageReceiver(dynamic message) {
     if (message is Map) {
       switch (message["method"]) {
@@ -27,6 +33,22 @@ void main() {
           return 'zh_CN';
         case 'delay':
           return Future.delayed(Duration(milliseconds: message["time"]));
+        case 'load_setting':
+          return settings[message["setting_key"]];
+        case 'load_data':
+          return savedData[message["data_key"]];
+        case 'save_data':
+          savedData[message["data_key"]] = message["data"];
+          return null;
+        case 'http':
+          return Future.value({
+            "status": 200,
+            "headers": <String, String>{},
+            "body":
+                '{"code":0,"msg":"ok","data":{"current_GP":123,"get_GP":25,'
+                '"archive_url":"https://example.hath.network/archive/x.zip"}}',
+            "error": null,
+          });
         default:
           return null;
       }
@@ -52,7 +74,7 @@ void main() {
 
   test(
     'ehentai.js instantiates under the real QuickJS engine',
-    () {
+    () async {
       var js = File('ehentai.js').readAsStringSync().replaceAll("\r\n", "\n");
       String? line1;
       for (var line in js.split('\n')) {
@@ -99,6 +121,20 @@ void main() {
         engine!.evaluate("typeof this['temp'].comic.archive.getDownloadUrl"),
         'function',
       );
+
+      // The auto check-in runs via init() and must record the check-in date.
+      expect(savedData.containsKey('lastArbotCheckin'), isFalse);
+      engine!.evaluate("this['temp'].init()");
+      await pumpEventQueue();
+      expect(savedData['lastArbotCheckin'], isNotNull);
+
+      // arbotRequest parses the bot response and carries the API key.
+      var balance = await engine!.evaluate(
+        "this['temp'].arbotRequest('/balance', {})",
+      );
+      expect(balance, isA<Map>());
+      expect((balance as Map)['status'], 200);
+      expect(((balance['json'] as Map)['data'] as Map)['current_GP'], 123);
     },
     skip: libAvailable ? false : 'libflutter_qjs_plugin.so not available',
   );
