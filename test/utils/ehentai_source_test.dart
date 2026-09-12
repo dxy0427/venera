@@ -26,6 +26,17 @@ void main() {
   };
   final savedData = <String, dynamic>{};
 
+  /// The HtmlDocument registry lives on the App side (_JSEngineApi). The
+  /// test engine has no such registry; mirror its accounting (key -> html)
+  /// to detect documents that are parsed but never disposed by the source.
+  final documents = <int, String>{};
+  final elements = <int, String>{};
+  int nextElementKey = 0;
+  Future<dynamic> Function(Map<String, dynamic>)? httpHandler;
+
+  Map<String, dynamic> asStringKeyedMap(Map<dynamic, dynamic> m) =>
+      m.map((k, v) => MapEntry(k.toString(), v));
+
   Object? messageReceiver(dynamic message) {
     if (message is Map) {
       switch (message["method"]) {
@@ -41,6 +52,9 @@ void main() {
           savedData[message["data_key"]] = message["data"];
           return null;
         case 'http':
+          if (httpHandler != null) {
+            return httpHandler!(asStringKeyedMap(message));
+          }
           return Future.value({
             "status": 200,
             "headers": <String, String>{},
@@ -59,6 +73,37 @@ void main() {
             return Future.value(false);
           }
           return null;
+        case 'html':
+          // Mirror _JSEngineApi.handleHtmlCallback document accounting and
+          // provide a minimal script-finding implementation for the
+          // querySelectorAll("script") calls used by getKey. Element keys
+          // are encoded as int keys into the scripts table.
+          switch (message['function']) {
+            case 'parse':
+              documents[message['key']] = message['data'].toString();
+              return null;
+            case 'dispose':
+              documents.remove(message['key']);
+              return null;
+            case 'querySelectorAll':
+              if (message['query'] == 'script') {
+                var html = documents[message['key']] ?? '';
+                var keys = <int>[];
+                for (var match in RegExp(
+                  r'<script[^>]*>([\s\S]*?)</script>',
+                ).allMatches(html)) {
+                  var elementKey = nextElementKey++;
+                  elements[elementKey] = match.group(1) ?? '';
+                  keys.add(elementKey);
+                }
+                return keys;
+              }
+              return <dynamic>[];
+            case 'getText':
+              return elements[message['key']] ?? '';
+            default:
+              return null;
+          }
         default:
           return null;
       }
@@ -165,6 +210,68 @@ void main() {
       expect(balance, isA<Map>());
       expect((balance as Map)['status'], 200);
       expect(((balance['json'] as Map)['data'] as Map)['current_GP'], 123);
+    },
+    skip: libAvailable ? false : 'libflutter_qjs_plugin.so not available',
+  );
+
+  test(
+    'ehentai.js disposes HtmlDocuments on every path (leak regression)',
+    () async {
+      var galleryHtml = '''
+<html><head><script type="text/javascript">
+var showkey="1234567890abcdef";
+</script></head>
+<body><div id="gdt"></div></body></html>
+''';
+      httpHandler = (message) {
+        return Future.value({
+          "status": 200,
+          "headers": <String, String>{},
+          "body": galleryHtml,
+          "error": null,
+        });
+      };
+      documents.clear();
+      for (var i = 0; i < 12; i++) {
+        var key = await engine!.evaluate(
+          "this['temp'].comic.getKey('https://e-hentai.org/g/1/abcdef1234')",
+        );
+        expect((key as Map)['showkey'], '1234567890abcdef');
+      }
+      expect(
+        documents,
+        isEmpty,
+        reason:
+            'getKey must dispose its HtmlDocument on every path; '
+            'leaked keys: $documents',
+      );
+
+      // The same for loadThumbnails (every reader page load calls it).
+      var thumbnailHtml = '''
+<html><body><table class="ptb"><tbody><tr><td><a href="?p=1">1</a></td></tr></tbody></table>
+<div id="gdt"><a href="https://e-hentai.org/s/key1/gid/token">1</a></div></body></html>
+''';
+      httpHandler = (message) {
+        return Future.value({
+          "status": 200,
+          "headers": <String, String>{},
+          "body": thumbnailHtml,
+          "error": null,
+        });
+      };
+      documents.clear();
+      for (var i = 0; i < 12; i++) {
+        await engine!.evaluate(
+          "this['temp'].comic.loadThumbnails("
+          "'https://e-hentai.org/g/1/abcdef1234')",
+        );
+      }
+      expect(
+        documents,
+        isEmpty,
+        reason: 'loadThumbnails must dispose its HtmlDocument',
+      );
+      httpHandler = null;
     },
     skip: libAvailable ? false : 'libflutter_qjs_plugin.so not available',
   );
