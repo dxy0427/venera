@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
@@ -249,7 +250,7 @@ class _FakeWebDavComicClient extends WebDavComicClient {
   Future<bool> isComicDirectory(String path) async => false;
 
   @override
-  Future<Uint8List> readImage(String path) async {
+  Future<Uint8List> readImage(String path, {CancelToken? cancelToken}) async {
     imageReadCount++;
     return imageResults.take();
   }

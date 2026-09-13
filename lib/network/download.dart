@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:isolate';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart' show ChangeNotifier;
 import 'package:flutter_saf/flutter_saf.dart';
 import 'package:venera/foundation/app.dart';
@@ -587,9 +588,13 @@ class _ImageDownloadWrapper {
 
   bool isCancelled = false;
 
+  /// Cancels the underlying network transfer as well as the waiter chain.
+  final CancelToken cancelToken = CancelToken();
+
   void cancel() {
     if (isCancelled) return;
     isCancelled = true;
+    cancelToken.cancel();
     // Wake every waiter so cancellation never leaves the resume loop or the
     // delete-await in `task.cancel()` hanging forever.
     for (var c in completers) {
@@ -612,6 +617,7 @@ class _ImageDownloadWrapper {
         task.source.key,
         task.comicId,
         chapter,
+        cancelToken: cancelToken,
       )) {
         if (isCancelled) {
           return;

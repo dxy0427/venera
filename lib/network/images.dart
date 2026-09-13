@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter_qjs/flutter_qjs.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
@@ -155,17 +156,25 @@ abstract class ImageDownloader {
     String imageKey,
     String? sourceKey,
     String cid,
-    String eid,
-  ) {
-    return _loadComicImage(imageKey, sourceKey, cid, eid);
+    String eid, {
+    CancelToken? cancelToken,
+  }) {
+    return _loadComicImage(
+      imageKey,
+      sourceKey,
+      cid,
+      eid,
+      cancelToken: cancelToken,
+    );
   }
 
   static Stream<ImageDownloadProgress> _loadComicImage(
     String imageKey,
     String? sourceKey,
     String cid,
-    String eid,
-  ) async* {
+    String eid, {
+    CancelToken? cancelToken,
+  }) async* {
     final cacheKey = _cacheKey(imageKey, sourceKey, '$cid@$eid');
     final cache = await CacheManager().findCache(cacheKey);
 
@@ -188,7 +197,7 @@ abstract class ImageDownloader {
         !imageKey.startsWith('http://') &&
         !imageKey.startsWith('https://')) {
       try {
-        final bytes = await loadSpecialImageBytes(imageKey);
+        final bytes = await loadSpecialImageBytes(imageKey, cancelToken: cancelToken);
         await CacheManager().writeCache(cacheKey, bytes);
         yield ImageDownloadProgress(
           currentBytes: bytes.length,
@@ -380,7 +389,10 @@ class _StreamWrapper<T> {
   }
 }
 
-Future<Uint8List> loadSpecialImageBytes(String imageKey) async {
+Future<Uint8List> loadSpecialImageBytes(
+  String imageKey, {
+  CancelToken? cancelToken,
+}) async {
   if (imageKey.startsWith('file://')) {
     return File(imageKey.substring(7)).readAsBytes();
   }
@@ -388,7 +400,9 @@ Future<Uint8List> loadSpecialImageBytes(String imageKey) async {
     return LocalCbzReader.readReference(imageKey);
   }
   final ref = WebDavResourceRef.parse(imageKey);
-  return WebDavProvider.forAccount(ref.accountId).loadImage(imageKey);
+  return WebDavProvider.forAccount(
+    ref.accountId,
+  ).loadImage(imageKey, cancelToken: cancelToken);
 }
 
 class ImageDownloadProgress {

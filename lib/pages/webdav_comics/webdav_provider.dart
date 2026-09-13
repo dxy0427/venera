@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
@@ -630,7 +631,7 @@ class WebDavProvider with ChangeNotifier {
   }
 
   /// Load an image from WebDAV or streaming CBZ with caching.
-  Future<Uint8List> loadImage(String path) async {
+  Future<Uint8List> loadImage(String path, {CancelToken? cancelToken}) async {
     _requireAccount();
     // Local extracted images (offline fallback)
     if (path.startsWith('file://')) {
@@ -658,7 +659,7 @@ class WebDavProvider with ChangeNotifier {
     final cacheKey = _cacheKey('webdav_img', realPath);
     final cached = await CacheManager().findCache(cacheKey);
     if (cached != null) return cached.readAsBytes();
-    final data = await _client.readImage(realPath);
+    final data = await _client.readImage(realPath, cancelToken: cancelToken);
     await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
     return data;
   }

@@ -417,7 +417,7 @@ class WebDavComicClient {
   }
 
   /// Read an image file from WebDAV as bytes.
-  Future<Uint8List> readImage(String path) async {
+  Future<Uint8List> readImage(String path, {CancelToken? cancelToken}) async {
     final client = getClient();
     try {
       // Download to temp file, then read
@@ -425,11 +425,14 @@ class WebDavComicClient {
       final tempFile = File(
         '${tempDir.path}/webdav_temp_${DateTime.now().microsecondsSinceEpoch}',
       );
-      await client.read2File(path, tempFile.path);
+      await client.read2File(path, tempFile.path, cancelToken: cancelToken);
       final data = await tempFile.readAsBytes();
       await tempFile.deleteIgnoreError();
       return data;
     } catch (e, s) {
+      if (e is DioException && CancelToken.isCancel(e)) {
+        rethrow;
+      }
       final msg = e.toString();
       if (msg.contains('404') || msg.contains('Not found')) {
         Log.info("WebDavClient", "Not found: $path");

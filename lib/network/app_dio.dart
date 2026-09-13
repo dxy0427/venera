@@ -277,6 +277,12 @@ class RHttpAdapter implements HttpClientAdapter {
       options.headers['User-Agent'] = "venera/v${App.version}";
     }
 
+    // Forward dio's cancellation (CancelToken / abort) to the underlying Rust
+    // request so cancelled downloads stop transferring bytes instead of only
+    // failing after the whole body has been read.
+    final rhttpCancelToken = rhttp.CancelToken();
+    cancelFuture?.then((_) => rhttpCancelToken.cancel());
+
     var res = await rhttp.Rhttp.request(
       method: rhttp.HttpMethod(options.method),
       url: options.uri.toString(),
@@ -290,6 +296,7 @@ class RHttpAdapter implements HttpClientAdapter {
           ),
         ),
       ),
+      cancelToken: rhttpCancelToken,
     );
     if (res is! rhttp.HttpStreamResponse) {
       throw Exception("Invalid response type: ${res.runtimeType}");
