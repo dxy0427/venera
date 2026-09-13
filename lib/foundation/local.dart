@@ -478,7 +478,7 @@ class LocalManager with ChangeNotifier {
       if (await chapterArchive.exists() && _isZipArchiveName(cid)) {
         return LocalCbzReader.listImageReferences(chapterArchive.path);
       }
-      cid = getChapterDirectoryName(cid);
+      cid = getChapterDirectoryNameFor(comic.chapters, cid);
       directory = Directory(FilePath.join(directory.path, cid));
     }
     if (!await directory.exists()) {
@@ -557,7 +557,10 @@ class LocalManager with ChangeNotifier {
     if (cid == null || !comic.downloadedChapters.contains(cid)) return false;
     // 校验该章节目录实际存在
     var chapterDir = Directory(
-      FilePath.join(comic.baseDir, getChapterDirectoryName(cid)),
+      FilePath.join(
+        comic.baseDir,
+        getChapterDirectoryNameFor(comic.chapters, cid),
+      ),
     );
     if (chapterDir.existsSync()) return true;
     return File(FilePath.join(comic.baseDir, cid)).existsSync() &&
@@ -745,7 +748,10 @@ class LocalManager with ChangeNotifier {
     var shouldRemovedEntities = <FileSystemEntity>[];
     for (var chapter in chapters) {
       var dir = Directory(
-        FilePath.join(c.baseDir, getChapterDirectoryName(chapter)),
+        FilePath.join(
+          c.baseDir,
+          getChapterDirectoryNameFor(c.chapters, chapter),
+        ),
       );
       if (dir.existsSync()) {
         shouldRemovedEntities.add(dir);
@@ -846,6 +852,27 @@ class LocalManager with ChangeNotifier {
       }
     }
     return builder.toString();
+  }
+
+  /// Resolve the on-disk directory name for a chapter.
+  ///
+  /// Sources like WebDAV use long opaque references (`webdav://resource/...`)
+  /// as chapter ids, which make for unusable directory names. For those, the
+  /// chapter title (e.g. "第0话") is used as the directory name. All other
+  /// sources keep the chapter id as the directory name, preserving the
+  /// existing on-disk layout and the id-as-directory-name contract.
+  static String getChapterDirectoryNameFor(
+    ComicChapters? chapters,
+    String chapterId,
+  ) {
+    String name = chapterId;
+    if (chapterId.startsWith('webdav://')) {
+      final title = chapters?[chapterId];
+      if (title != null && title.isNotEmpty) {
+        name = title;
+      }
+    }
+    return getChapterDirectoryName(name);
   }
 }
 

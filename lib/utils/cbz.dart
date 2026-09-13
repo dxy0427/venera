@@ -345,7 +345,10 @@ abstract class CBZ {
     var missingChapters = <String>[];
     for (var c in chapterIds) {
       var chapterDir = Directory(
-        FilePath.join(comic.baseDir, LocalManager.getChapterDirectoryName(c)),
+        FilePath.join(
+          comic.baseDir,
+          LocalManager.getChapterDirectoryNameFor(comic.chapters, c),
+        ),
       );
       final chapterArchive = File(FilePath.join(comic.baseDir, c));
       if (chapterDir.existsSync() ||
@@ -390,7 +393,10 @@ abstract class CBZ {
       if (await chapterArchive.exists() && _isDirectReadArchive(chapterId)) {
         return LocalCbzReader.listImageReferences(chapterArchive.path);
       }
-      var cid = LocalManager.getChapterDirectoryName(chapterId);
+      var cid = LocalManager.getChapterDirectoryNameFor(
+        comic.chapters,
+        chapterId,
+      );
       directory = Directory(FilePath.join(directory.path, cid));
     }
     if (!await directory.exists()) {

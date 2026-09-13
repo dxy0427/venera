@@ -74,7 +74,10 @@ Future<List<String>> _listPdfImages(LocalComic comic, String localPath) async {
         continue;
       }
       final chapterDir = Directory(
-        FilePath.join(baseDir, LocalManager.getChapterDirectoryName(chapter)),
+        FilePath.join(
+          baseDir,
+          LocalManager.getChapterDirectoryNameFor(comic.chapters, chapter),
+        ),
       );
       if (chapterDir.existsSync()) {
         var files = chapterDir.listSync();

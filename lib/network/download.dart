@@ -103,6 +103,13 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   @override
   void cancel() {
     _isRunning = false;
+    // Stop every in-flight image download so the scheduled chain does not
+    // keep producing new files after cancellation.
+    for (var task in tasks.values) {
+      if (!task.isComplete) {
+        task.cancel();
+      }
+    }
     LocalManager().removeTask(this);
     var local = LocalManager().find(id, comicType);
     if (path != null) {
@@ -111,7 +118,6 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
           var tasks = this.tasks.values.toList();
           for (var i = 0; i < tasks.length; i++) {
             if (!tasks[i].isComplete) {
-              tasks[i].cancel();
               await tasks[i].wait();
             }
           }
@@ -123,9 +129,20 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         });
       } else if (chapters != null) {
         for (var c in chapters!) {
-          var dir = Directory(FilePath.join(path!, c));
+          var dir = Directory(
+            FilePath.join(
+              path!,
+              LocalManager.getChapterDirectoryNameFor(comic?.chapters, c),
+            ),
+          );
           if (dir.existsSync()) {
             dir.deleteSync(recursive: true);
+          } else {
+            // Legacy layouts used the raw chapter id as the directory name.
+            var legacy = Directory(FilePath.join(path!, c));
+            if (legacy.existsSync()) {
+              legacy.deleteSync(recursive: true);
+            }
           }
         }
       }
@@ -192,6 +209,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       (appdata.settings["downloadThreads"] as num).toInt();
 
   void _scheduleTasks() {
+    if (!_isRunning) {
+      return;
+    }
     var images = _images![_images!.keys.elementAt(_chapter)]!;
     var downloading = 0;
     for (var i = _index; i < images.length; i++) {
@@ -211,7 +231,8 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         saveTo = Directory(
           FilePath.join(
             path!,
-            LocalManager.getChapterDirectoryName(
+            LocalManager.getChapterDirectoryNameFor(
+              comic!.chapters,
               _images!.keys.elementAt(_chapter),
             ),
           ),
@@ -574,7 +595,16 @@ class _ImageDownloadWrapper {
   bool isCancelled = false;
 
   void cancel() {
+    if (isCancelled) return;
     isCancelled = true;
+    // Wake every waiter so cancellation never leaves the resume loop or the
+    // delete-await in `task.cancel()` hanging forever.
+    for (var c in completers) {
+      if (!c.isCompleted) {
+        c.complete(this);
+      }
+    }
+    completers.clear();
   }
 
   var completers = <Completer<_ImageDownloadWrapper>>[];

@@ -282,7 +282,10 @@ Future<List<EpubChapter>> collectEpubImages(LocalComic comic) async {
     for (var c in comic.chapters!.ids) {
       if (!downloadedSet.contains(c)) continue;
       var chapterDir = Directory(
-        FilePath.join(comic.baseDir, LocalManager.getChapterDirectoryName(c)),
+        FilePath.join(
+          comic.baseDir,
+          LocalManager.getChapterDirectoryNameFor(comic.chapters, c),
+        ),
       );
       if (chapterDir.existsSync()) {
         availableChapters.add(c);
@@ -330,7 +333,10 @@ Future<List<String>> _listChapterImages(
     return LocalCbzReader.listImageReferences(archive.path);
   }
   final directory = Directory(
-    FilePath.join(comic.baseDir, LocalManager.getChapterDirectoryName(chapter)),
+    FilePath.join(
+      comic.baseDir,
+      LocalManager.getChapterDirectoryNameFor(comic.chapters, chapter),
+    ),
   );
   final files =
       directory

@@ -1,4 +1,6 @@
 import 'dart:async' show Future;
+import 'dart:io' show File;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:venera/foundation/image_provider/base_image_provider.dart';
@@ -31,6 +33,9 @@ class WebDavImageProvider
   @override
   Future<Uint8List> load(chunkEvents, checkStop) async {
     checkStop();
+    if (path.startsWith('file://')) {
+      return File(path.substring(7)).readAsBytes();
+    }
     return WebDavProvider.forAccount(accountId).loadImage(path);
   }
 
@@ -64,6 +69,9 @@ class WebDavReaderImageProvider
   @override
   Future<Uint8List> load(chunkEvents, checkStop) async {
     checkStop();
+    if (path.startsWith('file://')) {
+      return File(path.substring(7)).readAsBytes();
+    }
     return WebDavProvider.forAccount(accountId).loadImage(path);
   }
 
