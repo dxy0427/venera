@@ -111,41 +111,34 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       }
     }
     LocalManager().removeTask(this);
+
+    // Remove whatever this task already wrote to disk, so a cancelled
+    // download returns to "not downloaded". Reuse the LocalManager helpers so
+    // the SQLite bookkeeping, favorites and history stay consistent.
     var local = LocalManager().find(id, comicType);
-    if (path != null) {
-      if (local == null) {
-        Future.sync(() async {
-          var tasks = this.tasks.values.toList();
-          for (var i = 0; i < tasks.length; i++) {
-            if (!tasks[i].isComplete) {
-              await tasks[i].wait();
-            }
-          }
-          try {
-            await Directory(path!).delete(recursive: true);
-          } catch (e) {
-            Log.error("Download", "Failed to delete directory: $e");
-          }
-        });
-      } else if (chapters != null) {
-        for (var c in chapters!) {
-          var dir = Directory(
-            FilePath.join(
-              path!,
-              LocalManager.getChapterDirectoryNameFor(comic?.chapters, c),
-            ),
-          );
-          if (dir.existsSync()) {
-            dir.deleteSync(recursive: true);
-          } else {
-            // Legacy layouts used the raw chapter id as the directory name.
-            var legacy = Directory(FilePath.join(path!, c));
-            if (legacy.existsSync()) {
-              legacy.deleteSync(recursive: true);
-            }
+    if (local != null) {
+      if (chapters != null) {
+        final downloaded = chapters!
+            .where(local.downloadedChapters.contains)
+            .toList();
+        if (downloaded.isNotEmpty) {
+          LocalManager().deleteComicChapters(local, downloaded);
+        }
+        // If this task finished no chapter yet, leave the previously
+        // downloaded chapters (from earlier tasks) untouched.
+      } else {
+        LocalManager().deleteComic(local);
+      }
+    } else if (path != null) {
+      Future.sync(() async {
+        var inFlight = tasks.values.toList();
+        for (var i = 0; i < inFlight.length; i++) {
+          if (!inFlight[i].isComplete) {
+            await inFlight[i].wait();
           }
         }
-      }
+        await Directory(path!).deleteIgnoreError(recursive: true);
+      });
     }
   }
 
