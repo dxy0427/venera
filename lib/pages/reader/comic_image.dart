@@ -431,7 +431,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
                           _loadingProgress!.expectedTotalBytes! != 0)
                       ? _loadingProgress!.cumulativeBytesLoaded /
                             _loadingProgress!.expectedTotalBytes!
-                      : 0,
+                      : null,
                 ),
               ),
             ),

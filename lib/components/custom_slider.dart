@@ -152,9 +152,20 @@ class _CustomSliderState extends State<CustomSlider> {
                     }
                     var gap = constraints.maxWidth / widget.divisions;
                     var gapValue = (widget.max - widget.min) / widget.divisions;
-                    widget.onChanged.call(
-                      (dx / gap).round() * gapValue + widget.min,
-                    );
+                    // Only move the thumb while dragging; the value is
+                    // committed once when the drag ends.
+                    setState(() {
+                      value = (dx / gap).round() * gapValue + widget.min;
+                    });
+                  },
+                  onVerticalDragEnd: (_) => widget.onChanged.call(value),
+                  onVerticalDragCancel: () {
+                    // A plain tap also rejects the drag recognizer and ends
+                    // up here. Snap the thumb back to the committed value
+                    // instead of emitting an extra jump.
+                    if (value != widget.value) {
+                      setState(() => value = widget.value);
+                    }
                   },
                   child: SizedBox(
                     height: 24,
