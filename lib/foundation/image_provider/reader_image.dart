@@ -2,7 +2,6 @@ import 'dart:async' show Future;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_qjs/flutter_qjs.dart';
-import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/network/images.dart';
 import 'package:venera/utils/io.dart';
@@ -20,7 +19,6 @@ class ReaderImageProvider
     this.eid,
     this.page, {
     this.enableResize = false,
-    this.onLoadFailed,
   });
 
   final String imageKey;
@@ -32,8 +30,6 @@ class ReaderImageProvider
   final String eid;
 
   final int page;
-
-  final void Function()? onLoadFailed;
 
   @override
   final bool enableResize;
@@ -141,11 +137,4 @@ class ReaderImageProvider
 
   @override
   String get key => "$imageKey@$sourceKey@$cid@$eid@$enableResize";
-
-  @override
-  void onLoadError() {
-    var cacheKey = "loadComicPages@$sourceKey@$cid@$eid";
-    CacheManager().delete(cacheKey);
-    onLoadFailed?.call();
-  }
 }
