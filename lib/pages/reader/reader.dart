@@ -666,6 +666,8 @@ abstract mixin class _ReaderLocation {
 
   bool get isLoading;
 
+  bool get mounted;
+
   String get cid;
 
   ComicType get type;
@@ -716,6 +718,7 @@ abstract mixin class _ReaderLocation {
         _animationCount++;
         update();
         controller.animateToPage(page).then((_) {
+          if (!mounted) return;
           _animationCount--;
           if (_pendingPage == page) {
             _pendingPage = null;

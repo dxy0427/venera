@@ -495,6 +495,8 @@ class _GalleryModeState extends State<_GalleryMode>
     if (reverse) {
       images = images.reversed.toList();
     }
+    int pageForIndex(int index) =>
+        reverse ? startIndex + images.length - index : startIndex + index + 1;
 
     List<Widget> imageWidgets;
 
@@ -507,7 +509,7 @@ class _GalleryModeState extends State<_GalleryMode>
             image: _createImageProviderFromKey(
               images[0],
               context,
-              startIndex + 1,
+              pageForIndex(0),
             ),
             fit: BoxFit.contain,
             alignment: axis == Axis.vertical
@@ -524,7 +526,7 @@ class _GalleryModeState extends State<_GalleryMode>
             image: _createImageProviderFromKey(
               images[1],
               context,
-              startIndex + 2,
+              pageForIndex(1),
             ),
             fit: BoxFit.contain,
             alignment: axis == Axis.vertical
@@ -536,12 +538,11 @@ class _GalleryModeState extends State<_GalleryMode>
         ),
       ];
     } else {
-      imageWidgets = images.map((imageKey) {
-        startIndex++;
+      imageWidgets = images.asMap().entries.map((entry) {
         ImageProvider imageProvider = _createImageProviderFromKey(
-          imageKey,
+          entry.value,
           context,
-          startIndex,
+          pageForIndex(entry.key),
         );
         return Expanded(
           child: ComicImage(
@@ -795,6 +796,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   bool isZoomedIn = false;
   bool isLongPressing = false;
+  int _pageNavigationId = 0;
 
   @override
   void initState() {
@@ -1169,12 +1171,27 @@ class _ContinuousModeState extends State<_ContinuousMode>
   }
 
   @override
-  Future<void> animateToPage(int page) {
-    return itemScrollController.scrollTo(
+  Future<void> animateToPage(int page) async {
+    final navigationId = ++_pageNavigationId;
+    await itemScrollController.scrollTo(
       index: page,
       duration: const Duration(milliseconds: 200),
       curve: Curves.ease,
     );
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted ||
+        navigationId != _pageNavigationId ||
+        !itemScrollController.isAttached) {
+      return;
+    }
+    // Images may replace short placeholders while scrolling. The animation's
+    // pixel offset then becomes stale; anchor the requested page after layout.
+    final target = itemPositionsListener.itemPositions.value
+        .where((position) => position.index == page)
+        .firstOrNull;
+    if (target == null || target.itemLeadingEdge.abs() > 0.001) {
+      itemScrollController.jumpTo(index: page);
+    }
   }
 
   @override
@@ -1232,6 +1249,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   @override
   void toPage(int page) {
+    _pageNavigationId++;
     itemScrollController.jumpTo(index: page);
     _futurePosition = null;
   }
