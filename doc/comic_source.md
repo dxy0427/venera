@@ -141,8 +141,10 @@ Remove this function if not used.
          */
         loginWithCookies: {
             fields: [
-                "field1",
-                "field2",
+                "ipb_member_id",
+                "ipb_pass_hash",
+                "igneous",
+                "star",
             ],
             /**
              * Validate cookies, return false if cookies are invalid.
