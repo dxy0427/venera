@@ -1,6 +1,7 @@
 import 'dart:async' show Future;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/images.dart';
@@ -94,4 +95,12 @@ class CachedImageProvider
 
   @override
   String get key => url + (sourceKey ?? "") + (cid ?? "");
+
+  @override
+  Future<void> onDeleteCache() async {
+    if (url.startsWith("file://")) return;
+    await CacheManager().delete(
+      ImageDownloader.cacheKeyFor(url, sourceKey, cid),
+    );
+  }
 }

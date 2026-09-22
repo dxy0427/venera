@@ -23,12 +23,17 @@ abstract class ImageDownloader {
 
     if (cache != null) {
       var data = await cache.readAsBytes();
-      yield ImageDownloadProgress(
-        currentBytes: data.length,
-        totalBytes: data.length,
-        imageBytes: data,
-      );
-      return;
+      if (data.isEmpty) {
+        // An empty entry fails decoding and would trap every retry.
+        await CacheManager().delete(cacheKey);
+      } else {
+        yield ImageDownloadProgress(
+          currentBytes: data.length,
+          totalBytes: data.length,
+          imageBytes: data,
+        );
+        return;
+      }
     }
 
     if ((url.startsWith('localcbz://') ||
@@ -39,6 +44,9 @@ abstract class ImageDownloader {
         !url.startsWith('http://') &&
         !url.startsWith('https://')) {
       final bytes = await loadSpecialImageBytes(url);
+      if (bytes.isEmpty) {
+        throw "Error: Empty image data.";
+      }
       await CacheManager().writeCache(cacheKey, bytes);
       yield ImageDownloadProgress(
         currentBytes: bytes.length,
@@ -107,6 +115,9 @@ abstract class ImageDownloader {
       (configs['onResponse'] as JSInvokable).free();
     }
 
+    if (buffer.isEmpty) {
+      throw "Error: Empty image data.";
+    }
     await CacheManager().writeCache(cacheKey, buffer);
     yield ImageDownloadProgress(
       currentBytes: buffer.length,
@@ -152,6 +163,13 @@ abstract class ImageDownloader {
     return '$value@$sourceKey${suffix == null ? '' : '@$suffix'}';
   }
 
+  /// The cache key used by [loadComicImage] and [loadThumbnail] for [value].
+  /// Image providers use it to invalidate corrupted downloads on
+  /// decode failure, so a retry fetches fresh data.
+  static String cacheKeyFor(String value, String? sourceKey, String? suffix) {
+    return _cacheKey(value, sourceKey, suffix);
+  }
+
   static Stream<ImageDownloadProgress> loadComicImageUnwrapped(
     String imageKey,
     String? sourceKey,
@@ -180,12 +198,17 @@ abstract class ImageDownloader {
 
     if (cache != null) {
       var data = await cache.readAsBytes();
-      yield ImageDownloadProgress(
-        currentBytes: data.length,
-        totalBytes: data.length,
-        imageBytes: data,
-      );
-      return;
+      if (data.isEmpty) {
+        // An empty entry fails decoding and would trap every retry.
+        await CacheManager().delete(cacheKey);
+      } else {
+        yield ImageDownloadProgress(
+          currentBytes: data.length,
+          totalBytes: data.length,
+          imageBytes: data,
+        );
+        return;
+      }
     }
 
     // Local CBZ entries, WebDAV streams, and extracted local images.
@@ -197,7 +220,13 @@ abstract class ImageDownloader {
         !imageKey.startsWith('http://') &&
         !imageKey.startsWith('https://')) {
       try {
-        final bytes = await loadSpecialImageBytes(imageKey, cancelToken: cancelToken);
+        final bytes = await loadSpecialImageBytes(
+          imageKey,
+          cancelToken: cancelToken,
+        );
+        if (bytes.isEmpty) {
+          throw "Error: Empty image data.";
+        }
         await CacheManager().writeCache(cacheKey, bytes);
         yield ImageDownloadProgress(
           currentBytes: bytes.length,
@@ -295,6 +324,9 @@ abstract class ImageDownloader {
           data = newData;
         }
 
+        if (data.isEmpty) {
+          throw "Error: Empty image data.";
+        }
         await CacheManager().writeCache(cacheKey, data);
         yield ImageDownloadProgress(
           currentBytes: data.length,

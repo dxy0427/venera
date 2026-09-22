@@ -5,7 +5,6 @@ import 'dart:ui' as ui show Codec;
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/log.dart';
 
 abstract class BaseImageProvider<T extends BaseImageProvider<T>>
@@ -112,7 +111,12 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
           getTargetSize: enableResize ? _getTargetSize : null,
         );
       } catch (e) {
-        await CacheManager().delete(this.key);
+        try {
+          await onDeleteCache();
+        } catch (e2) {
+          // Cleanup is best-effort and must not mask the decode error.
+          Log.error("Image Loading", e2);
+        }
         if (data.length < 2 * 1024) {
           // data is too short, it's likely that the data is text, not image
           try {
@@ -165,6 +169,11 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
   /// Called when image loading fails after all retries are exhausted.
   /// Subclasses can override to perform cleanup (e.g. invalidate page cache).
   void onLoadError() {}
+
+  /// Called when the downloaded bytes cannot be decoded. Subclasses should
+  /// invalidate the download cache so a retry fetches fresh data instead of
+  /// re-reading the same corrupted bytes.
+  Future<void> onDeleteCache() async {}
 }
 
 typedef FileDecoderCallback = Future<ui.Codec> Function(Uint8List);

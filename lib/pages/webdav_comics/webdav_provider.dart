@@ -528,11 +528,48 @@ class WebDavProvider with ChangeNotifier {
 
     final cacheKey = _cacheKey('webdav_stream', '${ref.encode()}/$entryName');
     final cached = await CacheManager().findCache(cacheKey);
-    if (cached != null) return cached.readAsBytes();
+    if (cached != null) {
+      final data = await cached.readAsBytes();
+      if (data.isEmpty) {
+        // An empty entry fails decoding and would trap every retry.
+        await CacheManager().delete(cacheKey);
+      } else {
+        return data;
+      }
+    }
 
     final data = await info.reader.readEntry(entryName);
+    if (data.isEmpty) {
+      throw "Error: Empty image data.";
+    }
     await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
     return data;
+  }
+
+  /// Invalidate the cached image bytes for [path] (same key logic as
+  /// [loadImage]) so the next load downloads fresh data. Used after a decode
+  /// failure, otherwise a retry would re-read the same corrupted bytes.
+  Future<void> invalidateImage(String path) async {
+    if (path.startsWith('file://')) return;
+    if (!WebDavResourceRef.isReference(path)) return;
+    final ref = WebDavResourceRef.parse(path);
+    if (ref.accountId != accountId) return;
+    if (ref.isStream) {
+      final entryName = ref.entryName;
+      // Without an entry name the key cannot be rebuilt without listing the
+      // archive; skip instead of doing network work in a cleanup path.
+      if (entryName == null || entryName.isEmpty) return;
+      await CacheManager().delete(
+        _cacheKey('webdav_stream', '${ref.encode()}/$entryName'),
+      );
+      return;
+    }
+    if (ref.kind != WebDavResourceKind.image) return;
+    var realPath = ref.remotePath;
+    realPath = realPath.startsWith('webdav://')
+        ? realPath.substring(8)
+        : realPath;
+    await CacheManager().delete(_cacheKey('webdav_img', realPath));
   }
 
   /// Download a CBZ file, extract it, return local image paths.
@@ -658,8 +695,19 @@ class WebDavProvider with ChangeNotifier {
     final realPath = path.startsWith('webdav://') ? path.substring(8) : path;
     final cacheKey = _cacheKey('webdav_img', realPath);
     final cached = await CacheManager().findCache(cacheKey);
-    if (cached != null) return cached.readAsBytes();
+    if (cached != null) {
+      final data = await cached.readAsBytes();
+      if (data.isEmpty) {
+        // An empty entry fails decoding and would trap every retry.
+        await CacheManager().delete(cacheKey);
+      } else {
+        return data;
+      }
+    }
     final data = await _client.readImage(realPath, cancelToken: cancelToken);
+    if (data.isEmpty) {
+      throw "Error: Empty image data.";
+    }
     await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
     return data;
   }

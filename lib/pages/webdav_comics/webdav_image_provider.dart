@@ -40,6 +40,11 @@ class WebDavImageProvider
   }
 
   @override
+  Future<void> onDeleteCache() async {
+    await WebDavProvider.forAccount(accountId).invalidateImage(path);
+  }
+
+  @override
   String get key => path;
 }
 
@@ -49,13 +54,8 @@ class WebDavReaderImageProvider
     extends BaseImageProvider<image_provider.WebDavReaderImageProvider> {
   final String path;
   final int page;
-  final void Function()? onLoadFailed;
 
-  const WebDavReaderImageProvider(
-    this.path, {
-    required this.page,
-    this.onLoadFailed,
-  });
+  const WebDavReaderImageProvider(this.path, {required this.page});
 
   String get accountId => WebDavResourceRef.parse(path).accountId;
 
@@ -76,8 +76,8 @@ class WebDavReaderImageProvider
   }
 
   @override
-  void onLoadError() {
-    onLoadFailed?.call();
+  Future<void> onDeleteCache() async {
+    await WebDavProvider.forAccount(accountId).invalidateImage(path);
   }
 
   @override

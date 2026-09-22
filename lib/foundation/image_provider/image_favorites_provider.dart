@@ -60,7 +60,9 @@ class ImageFavoritesProvider
         image = await getImageFromNetwork(imageKey, chunkEvents, checkStop);
       }
     }
-    await writeToCache(image);
+    if (image.isNotEmpty) {
+      await writeToCache(image);
+    }
     return image;
   }
 
@@ -79,7 +81,13 @@ class ImageFavoritesProvider
     if (!file.existsSync()) {
       return null;
     }
-    return await file.readAsBytes();
+    var data = await file.readAsBytes();
+    if (data.isEmpty) {
+      // An empty entry fails decoding and would trap every retry.
+      await file.delete();
+      return null;
+    }
+    return data;
   }
 
   /// Delete a image favorite cache
