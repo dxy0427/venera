@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/pages/webdav_comics/streaming_zip.dart';
 import 'package:venera/pages/webdav_comics/webdav_accounts.dart';
 import 'package:venera/pages/webdav_comics/webdav_client.dart';
@@ -218,6 +219,89 @@ void main() {
       );
     },
   );
+
+  test(
+    'cover stream caches under a stable key that can be invalidated',
+    () async {
+      const entries = [
+        ZipEntryInfo(
+          fileName: 'cover.jpg',
+          compressedSize: 4,
+          uncompressedSize: 4,
+          isDirectory: false,
+        ),
+      ];
+      final provider = WebDavProvider.forTesting(
+        accountId: 'test',
+        client: _FakeWebDavComicClient(),
+        streamingReaderFactory:
+            ({
+              required webdavUrl,
+              required user,
+              required pass,
+              knownFileSize,
+            }) {
+              return _FakeStreamingZipReader(
+                webdavUrl: webdavUrl,
+                listEntriesResult: Future.value(entries),
+                readEntryResults: const {
+                  'cover.jpg': [1, 2, 3, 4],
+                },
+              );
+            },
+      );
+      final coverRef = WebDavResourceRef.stream(
+        'test',
+        '/cover-stream.cbz',
+      ).encode();
+
+      expect(await provider.loadImage(coverRef), [1, 2, 3, 4]);
+
+      final cacheKey = 'webdav_stream_test_$coverRef/';
+      expect(await CacheManager().findCache(cacheKey), isNotNull);
+
+      await provider.invalidateImage(coverRef);
+      expect(await CacheManager().findCache(cacheKey), isNull);
+    },
+  );
+
+  test('entry stream caches per entry and can be invalidated', () async {
+    const entries = [
+      ZipEntryInfo(
+        fileName: '001.jpg',
+        compressedSize: 2,
+        uncompressedSize: 2,
+        isDirectory: false,
+      ),
+    ];
+    final provider = WebDavProvider.forTesting(
+      accountId: 'test',
+      client: _FakeWebDavComicClient(),
+      streamingReaderFactory:
+          ({required webdavUrl, required user, required pass, knownFileSize}) {
+            return _FakeStreamingZipReader(
+              webdavUrl: webdavUrl,
+              listEntriesResult: Future.value(entries),
+              readEntryResults: const {
+                '001.jpg': [9, 9],
+              },
+            );
+          },
+    );
+    final entryRef = WebDavResourceRef.stream(
+      'test',
+      '/entry-stream.cbz',
+      '001.jpg',
+    ).encode();
+
+    expect(await provider.loadImage(entryRef), [9, 9]);
+
+    final cacheKey = 'webdav_stream_test_$entryRef/001.jpg';
+    expect(await CacheManager().findCache(cacheKey), isNotNull);
+
+    await provider.invalidateImage(entryRef);
+    expect(await CacheManager().findCache(cacheKey), isNull);
+  });
 }
 
 class _FakeWebDavComicClient extends WebDavComicClient {
@@ -280,12 +364,21 @@ class _FakeStreamingZipReader extends StreamingZipReader {
   _FakeStreamingZipReader({
     required super.webdavUrl,
     required this.listEntriesResult,
+    this.readEntryResults = const {},
   }) : super(user: '', pass: '');
 
   final Future<List<ZipEntryInfo>> listEntriesResult;
+  final Map<String, List<int>> readEntryResults;
 
   @override
   Future<List<ZipEntryInfo>> listEntries() => listEntriesResult;
+
+  @override
+  Future<Uint8List> readEntry(String fileName) async {
+    final result = readEntryResults[fileName];
+    if (result == null) throw StateError('No fake entry for $fileName');
+    return Uint8List.fromList(result);
+  }
 
   @override
   void dispose() {}

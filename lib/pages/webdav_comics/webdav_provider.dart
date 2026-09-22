@@ -521,12 +521,15 @@ class WebDavProvider with ChangeNotifier {
       throw WebDavAccountMismatchException(accountId, ref.accountId);
     }
     final remotePath = ref.remotePath;
-    var entryName = ref.entryName;
-
     final info = await _ensureStreamReader(remotePath);
-    entryName ??= info.entries.first.fileName;
+    final entryName = ref.entryName ?? info.entries.first.fileName;
 
-    final cacheKey = _cacheKey('webdav_stream', '${ref.encode()}/$entryName');
+    // Include the declared entry name in the key (empty for entry-less cover
+    // streams) so invalidateImage can rebuild it without listing the archive.
+    final cacheKey = _cacheKey(
+      'webdav_stream',
+      '${ref.encode()}/${ref.entryName ?? ''}',
+    );
     final cached = await CacheManager().findCache(cacheKey);
     if (cached != null) {
       final data = await cached.readAsBytes();
@@ -555,12 +558,10 @@ class WebDavProvider with ChangeNotifier {
     final ref = WebDavResourceRef.parse(path);
     if (ref.accountId != accountId) return;
     if (ref.isStream) {
-      final entryName = ref.entryName;
-      // Without an entry name the key cannot be rebuilt without listing the
-      // archive; skip instead of doing network work in a cleanup path.
-      if (entryName == null || entryName.isEmpty) return;
+      // Entry-less stream references (covers) use an empty entry segment so
+      // the key stays rebuildable without network access.
       await CacheManager().delete(
-        _cacheKey('webdav_stream', '${ref.encode()}/$entryName'),
+        _cacheKey('webdav_stream', '${ref.encode()}/${ref.entryName ?? ''}'),
       );
       return;
     }
