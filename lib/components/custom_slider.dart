@@ -104,21 +104,42 @@ class CustomSlider extends StatefulWidget {
 
 class _CustomSliderState extends State<CustomSlider> {
   late double value;
+  bool _isDragging = false;
 
   @override
   void initState() {
     super.initState();
-    value = widget.value;
+    value = widget.value.clamp(widget.min, widget.max);
   }
 
   @override
   void didUpdateWidget(CustomSlider oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.value != oldWidget.value) {
-      setState(() {
-        value = widget.value;
-      });
+    if (widget.min != oldWidget.min ||
+        widget.max != oldWidget.max ||
+        widget.reversed != oldWidget.reversed) {
+      _isDragging = false;
+      value = widget.value.clamp(widget.min, widget.max);
+    } else if (!_isDragging && widget.value != oldWidget.value) {
+      value = widget.value.clamp(widget.min, widget.max);
     }
+  }
+
+  double _valueAt(double dx, double width) {
+    var fraction = (dx / width).clamp(0.0, 1.0);
+    if (widget.reversed) fraction = 1 - fraction;
+    final step = (fraction * widget.divisions).round();
+    return (widget.min + step * (widget.max - widget.min) / widget.divisions)
+        .clamp(widget.min, widget.max);
+  }
+
+  void _preview(double next) {
+    if (value != next) setState(() => value = next);
+  }
+
+  void _cancelDrag() {
+    _isDragging = false;
+    _preview(widget.value.clamp(widget.min, widget.max));
   }
 
   @override
@@ -131,141 +152,143 @@ class _CustomSliderState extends State<CustomSlider> {
           ? LayoutBuilder(
               builder: (context, constraints) => MouseRegion(
                 cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTapDown: (details) {
-                    var dx = details.localPosition.dx;
-                    if (widget.reversed) {
-                      dx = constraints.maxWidth - dx;
-                    }
-                    var gap = constraints.maxWidth / widget.divisions;
-                    var gapValue = (widget.max - widget.min) / widget.divisions;
-                    widget.onChanged.call(
-                      (dx / gap).round() * gapValue + widget.min,
-                    );
-                  },
-                  onVerticalDragUpdate: (details) {
-                    var dx = details.localPosition.dx;
-                    if (dx > constraints.maxWidth || dx < 0) return;
-                    if (widget.reversed) {
-                      dx = constraints.maxWidth - dx;
-                    }
-                    var gap = constraints.maxWidth / widget.divisions;
-                    var gapValue = (widget.max - widget.min) / widget.divisions;
-                    // Only move the thumb while dragging; the value is
-                    // committed once when the drag ends.
-                    setState(() {
-                      value = (dx / gap).round() * gapValue + widget.min;
-                    });
-                  },
-                  onVerticalDragEnd: (_) => widget.onChanged.call(value),
-                  onVerticalDragCancel: () {
-                    // A plain tap also rejects the drag recognizer and ends
-                    // up here. Snap the thumb back to the committed value
-                    // instead of emitting an extra jump.
-                    if (value != widget.value) {
-                      setState(() => value = widget.value);
-                    }
-                  },
-                  child: SizedBox(
-                    height: 24,
-                    child: Center(
-                      child: SizedBox(
-                        height: 24,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Positioned.fill(
-                              child: Center(
-                                child: Container(
-                                  width: double.infinity,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: theme.inactiveTrackColor,
-                                    borderRadius: const BorderRadius.all(
-                                      Radius.circular(10),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            if (constraints.maxWidth / widget.divisions > 10)
+                child: Listener(
+                  onPointerCancel: (_) => _cancelDrag(),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTapUp: (details) {
+                      _preview(
+                        _valueAt(
+                          details.localPosition.dx,
+                          constraints.maxWidth,
+                        ),
+                      );
+                      widget.onChanged(value);
+                    },
+                    onPanStart: (details) {
+                      _isDragging = true;
+                      _preview(
+                        _valueAt(
+                          details.localPosition.dx,
+                          constraints.maxWidth,
+                        ),
+                      );
+                    },
+                    onPanUpdate: (details) {
+                      if (!_isDragging) return;
+                      // Preview locally; only release commits a reader jump.
+                      _preview(
+                        _valueAt(
+                          details.localPosition.dx,
+                          constraints.maxWidth,
+                        ),
+                      );
+                    },
+                    onPanEnd: (_) {
+                      if (!_isDragging) return;
+                      _isDragging = false;
+                      widget.onChanged(value);
+                    },
+                    onPanCancel: _cancelDrag,
+                    child: SizedBox(
+                      height: 24,
+                      child: Center(
+                        child: SizedBox(
+                          height: 24,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
                               Positioned.fill(
-                                child: Row(
-                                  children: () {
-                                    var res = <Widget>[];
-                                    for (
-                                      int i = 0;
-                                      i < widget.divisions - 1;
-                                      i++
-                                    ) {
-                                      res.add(const Spacer());
-                                      res.add(
-                                        Container(
-                                          width: 4,
-                                          height: 4,
-                                          decoration: BoxDecoration(
-                                            color: colorScheme.surface.withRed(
-                                              10,
-                                            ),
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                    res.add(const Spacer());
-                                    return res;
-                                  }.call(),
-                                ),
-                              ),
-                            Positioned(
-                              top: 0,
-                              bottom: 0,
-                              left: widget.reversed ? null : 0,
-                              right: widget.reversed ? 0 : null,
-                              child: Center(
-                                child: Container(
-                                  width:
-                                      constraints.maxWidth *
-                                      ((value - widget.min) /
-                                          (widget.max - widget.min)),
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: theme.activeTrackColor,
-                                    borderRadius: const BorderRadius.all(
-                                      Radius.circular(10),
+                                child: Center(
+                                  child: Container(
+                                    width: double.infinity,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: theme.inactiveTrackColor,
+                                      borderRadius: const BorderRadius.all(
+                                        Radius.circular(10),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                            Positioned(
-                              top: 0,
-                              bottom: 0,
-                              left: widget.reversed
-                                  ? null
-                                  : constraints.maxWidth *
-                                            ((value - widget.min) /
-                                                (widget.max - widget.min)) -
-                                        11,
-                              right: !widget.reversed
-                                  ? null
-                                  : constraints.maxWidth *
-                                            ((value - widget.min) /
-                                                (widget.max - widget.min)) -
-                                        11,
-                              child: Center(
-                                child: Container(
-                                  width: 22,
-                                  height: 22,
-                                  decoration: BoxDecoration(
-                                    color: theme.activeTrackColor,
-                                    shape: BoxShape.circle,
+                              if (constraints.maxWidth / widget.divisions > 10)
+                                Positioned.fill(
+                                  child: Row(
+                                    children: () {
+                                      var res = <Widget>[];
+                                      for (
+                                        int i = 0;
+                                        i < widget.divisions - 1;
+                                        i++
+                                      ) {
+                                        res.add(const Spacer());
+                                        res.add(
+                                          Container(
+                                            width: 4,
+                                            height: 4,
+                                            decoration: BoxDecoration(
+                                              color: colorScheme.surface
+                                                  .withRed(10),
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                      res.add(const Spacer());
+                                      return res;
+                                    }.call(),
+                                  ),
+                                ),
+                              Positioned(
+                                top: 0,
+                                bottom: 0,
+                                left: widget.reversed ? null : 0,
+                                right: widget.reversed ? 0 : null,
+                                child: Center(
+                                  child: Container(
+                                    width:
+                                        constraints.maxWidth *
+                                        ((value - widget.min) /
+                                            (widget.max - widget.min)),
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: theme.activeTrackColor,
+                                      borderRadius: const BorderRadius.all(
+                                        Radius.circular(10),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                              Positioned(
+                                top: 0,
+                                bottom: 0,
+                                left: widget.reversed
+                                    ? null
+                                    : constraints.maxWidth *
+                                              ((value - widget.min) /
+                                                  (widget.max - widget.min)) -
+                                          11,
+                                right: !widget.reversed
+                                    ? null
+                                    : constraints.maxWidth *
+                                              ((value - widget.min) /
+                                                  (widget.max - widget.min)) -
+                                          11,
+                                child: Center(
+                                  child: Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: BoxDecoration(
+                                      color: theme.activeTrackColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
