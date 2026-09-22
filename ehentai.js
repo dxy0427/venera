@@ -7,7 +7,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.5.2"
+    version = "1.5.3"
 
     minAppVersion = "1.5.3"
 
@@ -290,29 +290,6 @@ class Ehentai extends ComicSource {
     // [Optional] account related
     account = {
 
-        /**
-         * [Optional] login with webview
-         */
-        loginWithWebview: {
-            url: "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
-            /**
-             * check login status
-             * @param url {string} - current url
-             * @param title {string} - current title
-             * @returns {boolean} - return true if login success
-             */
-            checkStatus: (url, title) => {
-                return title === "E-Hentai Forums";
-            },
-            onLoginSuccess: async () => {
-                let cookies = await Network.getCookies("https://forums.e-hentai.org")
-                cookies.forEach((cookie) => {
-                    cookie.domain = ".exhentai.org"
-                })
-                Network.setCookies("https://exhentai.org", cookies)
-            },
-        },
-
         loginWithCookies: {
             fields: [
                 "ipb_member_id",
@@ -442,14 +419,11 @@ class Ehentai extends ComicSource {
         return 0.5;
     }
 
-    async onLoadFailed() {
-        let cookies = await Network.getCookies('https://e-hentai.org')
-        cookies.forEach((c) => {
-            c.domain = '.exhentai.org'
-        })
-        cookies.filter((item) => item.name !== 'igneous')
-        Network.deleteCookies('https://exhentai.org')
-        Network.setCookies('https://exhentai.org', cookies)
+    /**
+     * Report a failed gallery request with a login hint. Cookies are only
+     * written by the login dialog; nothing is synced automatically.
+     */
+    reportLoadFailure() {
         throw `You may not have permission to access this page. Please check your network or try to login again.`
     }
 
@@ -470,7 +444,7 @@ class Ehentai extends ComicSource {
         }
         catch (e) {
             if(e.toString().toLowerCase().includes("redirect")) {
-                await this.onLoadFailed()
+                this.reportLoadFailure()
             }
             throw e
         }
@@ -478,7 +452,7 @@ class Ehentai extends ComicSource {
             throw `Invalid status code: ${res.status}`
         }
         if(res.body.trim().length === 0) {
-            await this.onLoadFailed()
+            this.reportLoadFailure()
         }
         if(res.body[0] !== '<') {
             if(res.body.includes("IP")) {

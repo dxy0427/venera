@@ -32,6 +32,7 @@ void main() {
   final documents = <int, String>{};
   final elements = <int, String>{};
   int nextElementKey = 0;
+  final cookieCalls = <Map<String, dynamic>>[];
   Future<dynamic> Function(Map<String, dynamic>)? httpHandler;
 
   Map<String, dynamic> asStringKeyedMap(Map<dynamic, dynamic> m) =>
@@ -69,6 +70,9 @@ void main() {
           if (message['function'] == 'showSelectDialog') {
             return Future.value(0);
           }
+          return null;
+        case 'cookie':
+          cookieCalls.add(asStringKeyedMap(message));
           return null;
         case 'html':
           // Mirror _JSEngineApi.handleHtmlCallback document accounting and
@@ -185,6 +189,12 @@ void main() {
         isTrue,
       );
 
+      // The webview login helper is gone; login is cookie-based only.
+      expect(
+        engine!.evaluate("this['temp'].account.loginWithWebview == null"),
+        isTrue,
+      );
+
       // Archive bot settings and functions must exist.
       expect(
         engine!.evaluate("this['temp'].settings['archiveBotApiKey'] != null"),
@@ -208,6 +218,37 @@ void main() {
       expect(balance, isA<Map>());
       expect((balance as Map)['status'], 200);
       expect(((balance['json'] as Map)['data'] as Map)['current_GP'], 123);
+    },
+    skip: libAvailable ? false : 'libflutter_qjs_plugin.so not available',
+  );
+
+  test(
+    'gallery failures report a login hint without syncing cookies',
+    () async {
+      httpHandler = (message) {
+        return Future.value({
+          "status": 200,
+          "headers": <String, String>{},
+          "body": "",
+          "error": null,
+        });
+      };
+      cookieCalls.clear();
+      Object? error;
+      try {
+        await engine!.evaluate(
+          "this['temp'].getGalleries('https://e-hentai.org/', false)",
+        );
+      } catch (e) {
+        error = e;
+      }
+      expect(error, isNotNull, reason: 'a gallery failure must throw');
+      expect(error.toString(), contains('permission'));
+      expect(
+        cookieCalls,
+        isEmpty,
+        reason: 'gallery failures must not touch cookies automatically',
+      );
     },
     skip: libAvailable ? false : 'libflutter_qjs_plugin.so not available',
   );
