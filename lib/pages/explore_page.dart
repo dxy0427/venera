@@ -42,9 +42,7 @@ class _ExplorePageState extends State<ExplorePage>
         controller = TabController(
           length: pages.length,
           vsync: this,
-          initialIndex: pages.isEmpty
-              ? 0
-              : oldIndex.clamp(0, pages.length - 1),
+          initialIndex: pages.isEmpty ? 0 : oldIndex.clamp(0, pages.length - 1),
         );
       });
     }

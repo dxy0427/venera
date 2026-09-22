@@ -16,8 +16,7 @@ ImageProvider? _findImageProvider(Comic comic) {
     var cover = comic.cover;
     if (cover.startsWith('file://')) {
       image = FileImage(File(cover.substring(7)));
-    } else if (cover.startsWith('http://') ||
-        cover.startsWith('https://')) {
+    } else if (cover.startsWith('http://') || cover.startsWith('https://')) {
       image = CachedImageProvider(cover);
     } else if (cover.isNotEmpty) {
       image = WebDavImageProvider(cover);
