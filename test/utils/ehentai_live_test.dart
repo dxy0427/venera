@@ -1,278 +1,234 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter_qjs/flutter_qjs.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/js_engine.dart';
 
-/// Live end-to-end test for the ehentai source against the real
-/// e-hentai.org (no account required).
+/// Opt-in source/network smoke test (no account required):
+/// VENERA_EHENTAI_LIVE_TEST=1 flutter test test/utils/ehentai_live_test.dart
 ///
-/// Reproduces the reader scenario "jump straight to a middle page":
-/// it resolves a middle page's image independently of pages 1..N-1,
-/// through the exact chain the app uses (loadThumbnails -> getKey ->
-/// imagedispatch API -> image download), with a real QuickJS engine,
-/// real DOM parsing and real network requests.
-///
-/// Skips automatically when e-hentai.org is unreachable (e.g. CI).
+/// Uses real QuickJS, the app's DOM bridge and dart:io HTTP. Reader widget
+/// regressions are covered separately in test/pages/reader. Native QuickJS
+/// must be loadable; an explicitly enabled run fails on network/native errors.
 void main() {
-  var networkOk = true;
-  FlutterQjs? engine;
-
-  final settings = <String, dynamic>{
-    'domain': 'e-hentai.org',
-    'archiveBotApiKey': 'test-key',
-    'archiveBotAutoCheckin': true,
-  };
-  final savedData = <String, dynamic>{};
-
-  Map<String, dynamic> asStringKeyedMap(Map<dynamic, dynamic> m) =>
-      m.map((k, v) => MapEntry(k.toString(), v));
-
-  const chromeUA =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-
-  Future<Map<String, dynamic>> realHttp(Map<String, dynamic> req) async {
-    String? error;
-    HttpClientResponse? response;
-    Uint8List? bodyBytes;
-    try {
-      var method = (req['http_method'] ?? 'GET').toString().toUpperCase();
-      var url = Uri.parse(req['url'].toString());
-      var headers = <String, String>{};
-      (req['headers'] as Map?)?.forEach((k, v) {
-        var key = k.toString().toLowerCase();
-        // App-internal meta options must not hit the wire.
-        if (key == 'cache-time' || key == 'prevent-parallel') return;
-        headers[key] = v.toString();
-      });
-      headers.putIfAbsent('user-agent', () => chromeUA);
-      var client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 20)
-        ..badCertificateCallback =
-            (X509Certificate cert, String host, int port) => true;
-      var request = await client.openUrl(method, url).timeout(
-        const Duration(seconds: 20),
-      );
-      headers.forEach((k, v) {
-        if (k != 'content-type') {
-          request.headers.set(k, v);
-        }
-      });
-      var data = req['data'];
-      if (data != null) {
-        String body;
-        if (data is Map || data is List) {
-          body = jsonEncode(data);
-        } else {
-          body = data.toString();
-        }
-        request.headers.contentLength = utf8.encode(body).length;
-        request.add(utf8.encode(body));
-      }
-      response = await request.close().timeout(const Duration(seconds: 20));
-      bodyBytes = await response
-          .fold(<int>[], (List<int> previous, List<int> chunk) {
-            previous.addAll(chunk);
-            return previous;
-          })
-          .timeout(const Duration(seconds: 60))
-          .then((list) => Uint8List.fromList(list));
-      client.close();
-    } catch (e) {
-      error = e.toString();
-    }
-    var responseHeaders = <String, String>{};
-    response?.headers.forEach((name, values) {
-      responseHeaders[name.toLowerCase()] = values.join(',');
-    });
-    dynamic body = req['bytes'] == true
-        ? bodyBytes
-        : (bodyBytes != null
-              ? utf8.decode(bodyBytes, allowMalformed: true)
-              : null);
-    return {
-      'status': response?.statusCode,
-      'headers': responseHeaders,
-      'body': body,
-      'error': error,
-    };
-  }
-
-  Object? messageReceiver(dynamic message) {
-    if (message is Map) {
-      switch (message['method']) {
-        case 'getLocale':
-          return 'zh_CN';
-        case 'delay':
-          return Future.delayed(Duration(milliseconds: message['time'] as int));
-        case 'load_setting':
-          return settings[message['setting_key']];
-        case 'load_data':
-          return savedData[message['data_key']];
-        case 'save_data':
-          savedData[message['data_key']] = message['data'];
-          return null;
-        case 'http':
-          return realHttp(asStringKeyedMap(message));
-        case 'html':
-          // Real DOM parsing: delegate to the app's own implementation.
-          return JsEngine().handleHtmlCallback(asStringKeyedMap(message));
-        case 'UI':
-          if (message['function'] == 'showSelectDialog') {
-            return Future.value(0);
-          }
-          return null;
-        case 'cookie':
-          return message['function'] == 'get' ? <dynamic>[] : null;
-        default:
-          return null;
-      }
-    }
-    return null;
-  }
-
-  setUpAll(() async {
-    try {
-      var client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 15);
-      var request = await client
-          .openUrl('GET', Uri.parse('https://e-hentai.org/'))
-          .timeout(const Duration(seconds: 15));
-      var response = await request.close().timeout(const Duration(seconds: 15));
-      await response.drain<void>();
-      client.close();
-      expect(response.statusCode, anyOf(200, 302));
-    } catch (e) {
-      networkOk = false;
-      // ignore: avoid_print
-      print('Skip: e-hentai.org unreachable: $e');
-    }
-    if (!networkOk) return;
-
-    engine = FlutterQjs();
-    engine!.dispatch();
-    var setGlobalFunc = engine!.evaluate(
-      "(key, value) => { this[key] = value; }",
-    );
-    (setGlobalFunc as JSInvokable)(["sendMessage", messageReceiver]);
-    setGlobalFunc.free();
-    var initJs = File('assets/init.js').readAsStringSync();
-    engine!.evaluate(initJs, name: "<init>");
-
-    var js = File('ehentai.js').readAsStringSync().replaceAll("\r\n", "\n");
-    String? line1;
-    for (var line in js.split('\n')) {
-      if (line.trim().startsWith("class ")) {
-        line1 = line;
-        break;
-      }
-    }
-    expect(line1, isNotNull, reason: 'class declaration not found');
-    var className = line1!
-        .split("class")[1]
-        .split("extends ComicSource")
-        .first
-        .trim();
-    engine!.evaluate(
-      "(() => { $js\n this['source'] = new $className()\n }).call()",
-      name: className,
-    );
-    expect(engine!.evaluate("this['source'].name"), 'ehentai');
-  });
-
-  tearDownAll(() {
-    engine?.close();
-  });
+  final enabled = Platform.environment['VENERA_EHENTAI_LIVE_TEST'] == '1';
 
   test(
-    'jumping to a middle page resolves and downloads independently',
+    'resolve a middle page first, download with progress and decode it',
     () async {
-      if (!networkOk) return;
-      var jsResult = await engine!.evaluate('''
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 20);
+      addTearDown(() => client.close(force: true));
+      final engine = FlutterQjs()..dispatch();
+      addTearDown(engine.close);
+      final dom = JsEngine();
+      addTearDown(dom.dispose);
+      final savedData = <String, dynamic>{};
+      final settings = {
+        'domain': 'e-hentai.org',
+        'archiveBotAutoCheckin': false,
+      };
+      final apiPages = <int>[];
+      const userAgent =
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
+      Future<Map<String, dynamic>> request(Map<String, dynamic> req) async {
+        final uri = Uri.parse(req['url'] as String);
+        final responseRequest = await client
+            .openUrl(req['http_method'] as String? ?? 'GET', uri)
+            .timeout(const Duration(seconds: 20));
+        responseRequest.headers.set('user-agent', userAgent);
+        (req['headers'] as Map?)?.forEach((key, value) {
+          if (key != 'cache-time' && key != 'prevent-parallel') {
+            responseRequest.headers.set(key.toString(), value.toString());
+          }
+        });
+        final data = req['data'];
+        if (data is Map &&
+            (data['method'] == 'showpage' ||
+                data['method'] == 'imagedispatch')) {
+          apiPages.add((data['page'] as num).toInt());
+        }
+        if (data != null) {
+          final body = utf8.encode(data is String ? data : jsonEncode(data));
+          responseRequest.contentLength = body.length;
+          responseRequest.add(body);
+        }
+        final response = await responseRequest.close().timeout(
+          const Duration(seconds: 20),
+        );
+        final bytes = BytesBuilder(copy: false);
+        final progress = <int>[];
+        await for (final chunk in response.timeout(
+          const Duration(seconds: 30),
+        )) {
+          bytes.add(chunk);
+          progress.add(bytes.length);
+        }
+        final body = bytes.takeBytes();
+        final headers = <String, String>{};
+        response.headers.forEach((key, values) {
+          headers[key] = values.join(',');
+        });
+        return {
+          'status': response.statusCode,
+          'headers': headers,
+          'body': req['bytes'] == true
+              ? body
+              : utf8.decode(body, allowMalformed: true),
+          'error': null,
+          'progress': progress,
+          'contentLength': response.contentLength,
+        };
+      }
+
+      Object? receiver(dynamic message) {
+        final data = Map<String, dynamic>.from(message as Map);
+        switch (data['method']) {
+          case 'getLocale':
+            return 'en_US';
+          case 'isLogged':
+            return false;
+          case 'delay':
+            return Future<void>.delayed(Duration(milliseconds: data['time']));
+          case 'load_setting':
+            return settings[data['setting_key']];
+          case 'load_data':
+            return savedData[data['data_key']];
+          case 'save_data':
+            savedData[data['data_key']] = data['data'];
+            return null;
+          case 'http':
+            return request(data);
+          case 'html':
+            return dom.handleHtmlCallback(data);
+          case 'cookie':
+            return data['function'] == 'get' ? <dynamic>[] : null;
+          default:
+            throw UnsupportedError(
+              'Unexpected live-test call: ${data['method']}',
+            );
+        }
+      }
+
+      final setGlobal =
+          engine.evaluate('(key, value) => { this[key] = value; }')
+              as JSInvokable;
+      setGlobal(['sendMessage', receiver]);
+      setGlobal.free();
+      engine.evaluate(
+        File('assets/init.js').readAsStringSync(),
+        name: '<init>',
+      );
+      final js = File('ehentai.js').readAsStringSync();
+      final className = RegExp(
+        r'class\s+(\w+)\s+extends ComicSource',
+      ).firstMatch(js)!.group(1)!;
+      engine.evaluate(
+        '(() => { $js\n this.source = new $className(); })()',
+        name: className,
+      );
+
+      final gallery = Platform.environment['VENERA_EHENTAI_TEST_GALLERY'];
+      final result = await engine.evaluate('''
         (async () => {
-          const src = this['source'];
-          const list = await src.explore[0].loadNext(null);
-          if (!list || !list.comics || list.comics.length === 0) {
-            return JSON.stringify({error: "no galleries in latest list"});
+          let id = ${jsonEncode(gallery)};
+          if (!id) {
+            const list = await source.explore[0].loadNext(null);
+            const comic = list.comics.find(c => c.maxPage >= 20 && c.maxPage <= 300);
+            if (!comic) throw new Error('No suitable public gallery in latest list');
+            id = comic.id;
           }
-          const comic = list.comics[0];
-          const ep = await src.comic.loadEp(comic.id);
-          const n = ep.images.length;
-          if (n < 4) {
-            return JSON.stringify({error: "gallery too short: " + n});
-          }
-          const mid = Math.floor(n / 2);
-          const first = await src.comic.onImageLoad(ep.images[0], comic.id, null);
-          const middle = await src.comic.onImageLoad(ep.images[mid], comic.id, null);
+          const chapter = await source.comic.loadEp(id);
+          if (chapter.images.length < 4) throw new Error('Gallery is too short');
+          const middle = Math.floor(chapter.images.length / 2);
+          // Resolve the middle first: no earlier image has been resolved yet.
+          const config = await source.comic.onImageLoad(chapter.images[middle], id, '0');
+          this.liveMiddle = config;
           return JSON.stringify({
-            comicId: comic.id,
-            maxPage: n,
-            midIndex: mid,
-            firstUrl: first.url,
-            middleUrl: middle.url,
-            middleReferer: middle.headers ? middle.headers.referer : null,
-            hasMiddleRetry: typeof middle.onLoadFailed === "function",
+            id, count: chapter.images.length, middle,
+            url: config.url, headers: config.headers,
+            retry: typeof config.onLoadFailed === 'function'
           });
         })()
       ''');
-      var data = jsonDecode(jsResult.toString()) as Map<String, dynamic>;
-      expect(data['error'], isNull, reason: 'source chain failed: ${data['error']}');
-      expect(data['comicId'], contains('e-hentai.org/g/'));
-      expect(data['maxPage'], greaterThanOrEqualTo(4));
-      var midIndex = data['midIndex'] as int;
-      expect(midIndex, greaterThan(0), reason: 'not a middle page');
-      expect(data['firstUrl'], isNotEmpty);
-      expect(data['middleUrl'], isNotEmpty);
-      expect(data['middleUrl'], isNot(equals(data['firstUrl'])));
-      expect(data['hasMiddleRetry'], isTrue,
-          reason: 'middle page must provide the nl retry callback');
+      final data = jsonDecode(result as String) as Map<String, dynamic>;
+      expect(Uri.parse(data['id'] as String).host, 'e-hentai.org');
+      expect(data['retry'], isTrue);
+      expect(apiPages, [(data['middle'] as int) + 1]);
 
-      // Download the resolved middle image with the returned referer and
-      // verify it is a real image, exactly as the reader would.
-      var request = await HttpClient()
-          .openUrl('GET', Uri.parse(data['middleUrl'] as String))
-          .timeout(const Duration(seconds: 20));
-      request.headers.set('user-agent', chromeUA);
-      var referer = data['middleReferer'] as String?;
-      if (referer != null && referer.isNotEmpty) {
-        request.headers.set('referer', referer);
+      Future<Map<String, dynamic>> download(String url, Map headers) {
+        return request({'url': url, 'headers': headers, 'bytes': true});
       }
-      var response = await request.close().timeout(const Duration(seconds: 20));
-      var bytes = await response.fold(
-        <int>[],
-        (List<int> previous, List<int> chunk) {
-          previous.addAll(chunk);
-          return previous;
-        },
-      ).timeout(const Duration(seconds: 60));
-      expect(response.statusCode, 200);
-      expect(bytes.length, greaterThan(1024), reason: 'image too small');
-      var isJpeg = bytes.length > 2 &&
-          bytes[0] == 0xFF &&
-          bytes[1] == 0xD8;
-      var isPng = bytes.length > 8 &&
-          bytes[0] == 0x89 &&
-          bytes[1] == 0x50 &&
-          bytes[2] == 0x4E &&
-          bytes[3] == 0x47;
-      var isGif = bytes.length > 6 && bytes[0] == 0x47 && bytes[1] == 0x49;
-      var isWebp = bytes.length > 12 &&
-          bytes[0] == 0x52 &&
-          bytes[1] == 0x49 &&
-          bytes[2] == 0x46 &&
-          bytes[3] == 0x46;
-      expect(isJpeg || isPng || isGif || isWebp, isTrue,
-          reason: 'not a recognized image format');
+
+      Future<void> checkImage(Map<String, dynamic> response) async {
+        expect(response['status'], 200);
+        final bytes = response['body'] as Uint8List;
+        final progress = response['progress'] as List<int>;
+        expect(bytes, isNotEmpty);
+        expect(progress, isNotEmpty);
+        expect(progress.last, bytes.length);
+        for (var i = 1; i < progress.length; i++) {
+          expect(progress[i], greaterThan(progress[i - 1]));
+        }
+        final total = response['contentLength'] as int;
+        if (total > 0) expect(bytes.length, total);
+        final codec = await ui.instantiateImageCodec(bytes);
+        try {
+          final frame = await codec.getNextFrame();
+          expect(frame.image.width, greaterThan(1));
+          expect(frame.image.height, greaterThan(1));
+          frame.image.dispose();
+        } finally {
+          codec.dispose();
+        }
+      }
+
+      final middleImage = await download(
+        data['url'] as String,
+        data['headers'] as Map,
+      );
+      await checkImage(middleImage);
+
+      // Reusing the same resolved URL should be measured, not assumed to be
+      // impossible. No extra API resolution is made for this second request.
+      final again = await download(
+        data['url'] as String,
+        data['headers'] as Map,
+      );
+      await checkImage(again);
+      expect(again['body'], orderedEquals(middleImage['body'] as Uint8List));
+      expect(apiPages, [(data['middle'] as int) + 1]);
+
+      final firstResult = await engine.evaluate('''
+        (async () => {
+          const config = await source.comic.onImageLoad('0', ${jsonEncode(data['id'])}, '0');
+          return JSON.stringify({url: config.url, headers: config.headers});
+        })()
+      ''');
+      final first = jsonDecode(firstResult as String) as Map<String, dynamic>;
+      expect(first['url'], isNot(data['url']));
+      await checkImage(
+        await download(first['url'] as String, first['headers'] as Map),
+      );
+      expect(apiPages, [(data['middle'] as int) + 1, 1]);
+
       // ignore: avoid_print
       print(
-        'gallery=${(data['comicId'] as String).split('/g/')[1]} '
-        'pages=${data['maxPage']} loadedMiddlePage=${midIndex + 1} '
-        'imageBytes=${bytes.length}',
+        'pages=${data['count']} middlePage=${(data['middle'] as int) + 1} '
+        'bytes=${(middleImage['body'] as Uint8List).length} '
+        'contentLength=${middleImage['contentLength']} '
+        'chunks=${(middleImage['progress'] as List).length} '
+        'sameUrlSecondDownload=OK decoded=OK',
       );
     },
-    timeout: const Timeout(Duration(minutes: 4)),
+    skip: enabled
+        ? false
+        : 'Set VENERA_EHENTAI_LIVE_TEST=1 to use the public EH site',
+    timeout: const Timeout(Duration(minutes: 3)),
   );
 }

@@ -109,6 +109,7 @@ void main() {
   }
 
   setUpAll(() {
+    if (!libAvailable) return;
     engine = FlutterQjs();
     engine!.dispatch();
     var setGlobalFunc = engine!.evaluate(
