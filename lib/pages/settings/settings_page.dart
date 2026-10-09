@@ -165,7 +165,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(width: 24),
-                Text("Settings".tl, style: context.textTheme.titleLarge),
+                Expanded(
+                  child: Text(
+                    "Settings".tl,
+                    style: context.textTheme.titleLarge,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
@@ -199,8 +206,14 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             Icon(icons[id]),
             const SizedBox(width: 16),
-            Text(name, style: context.textTheme.bodyLarge),
-            const Spacer(),
+            Expanded(
+              child: Text(
+                name,
+                style: context.textTheme.bodyLarge,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             if (selected) const Icon(Icons.arrow_right),
           ],
         ),

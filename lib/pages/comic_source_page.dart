@@ -856,45 +856,55 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
                   size: 20,
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  source.filePath.startsWith('builtin:')
-                      ? source.name.tl
-                      : source.name,
-                  style: context.textTheme.titleMedium,
+                Expanded(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        source.filePath.startsWith('builtin:')
+                            ? source.name.tl
+                            : source.name,
+                        style: context.textTheme.titleMedium,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: context.colorScheme.surfaceContainer,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                        ),
+                        child: Text(
+                          source.version,
+                          style: context.textTheme.labelMedium,
+                        ),
+                      ),
+                      if (hasUpdate)
+                        Tooltip(
+                          message: newVersion,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: context.colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(AppRadius.md),
+                            ),
+                            child: Text(
+                              "New Version".tl,
+                              style: context.textTheme.labelMedium,
+                            ),
+                          ),
+                        ).paddingLeft(4),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: context.colorScheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                  ),
-                  child: Text(
-                    source.version,
-                    style: context.textTheme.labelMedium,
-                  ),
-                ),
-                if (hasUpdate)
-                  Tooltip(
-                    message: newVersion,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(AppRadius.md),
-                      ),
-                      child: Text(
-                        "New Version".tl,
-                        style: context.textTheme.labelMedium,
-                      ),
-                    ),
-                  ).paddingLeft(4),
               ],
             ),
             trailing: source.filePath.startsWith('builtin:')

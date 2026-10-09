@@ -47,26 +47,39 @@ class HomeSectionCard extends StatelessWidget {
       constraints: const BoxConstraints(minHeight: 56),
       child: Row(
         children: [
-          Center(child: Text(title, style: context.textTheme.titleMedium)),
-          if (count != null)
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpace.sm,
-                vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                color: context.colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-              ),
-              child: Text(
-                count.toString(),
-                style: context.textTheme.labelMedium?.copyWith(
-                  color: context.colorScheme.onSecondaryContainer,
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    title,
+                    style: context.textTheme.titleMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
+                if (count != null)
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpace.sm,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: context.colorScheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Text(
+                      count.toString(),
+                      style: context.textTheme.labelMedium?.copyWith(
+                        color: context.colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          const Spacer(),
+          ),
+          const SizedBox(width: AppSpace.sm),
           trailing ?? const Icon(Icons.chevron_right),
         ],
       ),

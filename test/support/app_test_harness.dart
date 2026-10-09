@@ -1,16 +1,23 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/app_theme.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/local.dart';
 
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/utils/translations.dart';
+import 'package:venera/utils/data_sync.dart';
+
+import 'layout_source.dart';
 
 /// Routes every path_provider lookup at a throwaway temp directory so pages
 /// that persist state can initialise inside the test VM.
@@ -58,13 +65,21 @@ Future<void> initAppForTest() async {
   // doInit() has run (normally App.init() does this). Drive it directly.
   await appdata.init();
   // Several pages read these as non-null lists; their shipped default is null.
-  appdata.settings['searchSources'] = <String>[];
+  appdata.settings['searchSources'] = <String>['test'];
+  appdata.settings['explore_pages'] = <String>['Layout explore'];
+  appdata.settings['categories'] = <String>['test'];
   appdata.settings['quickFavorite'] = 'No';
+  DataSync.instance = DataSync.forTesting();
   await HistoryManager().init();
   await LocalFavoritesManager().init();
-  // LocalManager().init() is skipped: it awaits ComicSourceManager, which
-  // spins up the JS engine isolate and cannot run in the test VM.
+  LocalManager().initForTesting(dir.path);
   await ReadLaterManager().init();
+  final image = await createTestImage(width: 120, height: 180);
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  final cover = File('${dir.path}/layout-cover.png');
+  await cover.writeAsBytes(bytes!.buffer.asUint8List());
+  ComicSourceManager().add(createLayoutSource(cover.uri.toString()));
   _initialised = true;
 }
 
@@ -100,6 +115,8 @@ Future<Object?> renderPage(
   WidgetTester tester,
   Widget page, {
   required LayoutCase config,
+  bool navigationShell = false,
+  String? expectedText,
 }) async {
   tester.view.physicalSize = config.size;
   tester.view.devicePixelRatio = 1.0;
@@ -129,13 +146,46 @@ Future<Object?> renderPage(
           child: child!,
         );
       },
-      home: Scaffold(body: page),
+      home: navigationShell
+          ? NaviPane(
+              paneItems: [
+                PaneItemEntry(
+                  label: 'Explore',
+                  icon: Icons.explore_outlined,
+                  activeIcon: Icons.explore,
+                ),
+              ],
+              paneActions: const [],
+              pageBuilder: (_) => page,
+              observer: NaviObserver(),
+              navigatorKey: GlobalKey<NavigatorState>(),
+            )
+          : Scaffold(body: page),
     ),
   );
   // Let async state settle; pages that load data render a placeholder first.
+  // Search history and local cover files use real disk I/O, which cannot
+  // complete just by advancing the widget test's fake clock.
+  var storageFlushed = false;
+  final storage = appdata.saveData(false).whenComplete(() {
+    storageFlushed = true;
+  });
+  for (var i = 0; i < 100 && !storageFlushed; i++) {
+    // Let the OS finish writes, then service the fake-zone callbacks and the
+    // saveData lock's 20ms retry. Awaiting that lock inside runAsync deadlocks.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+  }
+  expect(storageFlushed, isTrue, reason: 'page storage writes did not finish');
+  await storage;
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
   final error = tester.takeException();
+  if (expectedText != null) {
+    expect(find.textContaining(expectedText), findsWidgets);
+  }
   // Tear the tree down so any debounce/delayed work the page started is
   // cancelled; the framework fails a test that leaves a timer pending, and an
   // undrained timer from one case can surface in the next.

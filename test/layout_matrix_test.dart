@@ -53,46 +53,14 @@ final _pages = <String, Widget Function()>{
   'WebDavComicsPage': () => const WebDavComicsPage(accountId: 'layout-test'),
 };
 
-/// Pages that read the comic source list, which lives behind
-/// ComicSourceManager -> JsEngine (a background isolate). The test VM cannot
-/// boot that isolate, so these stay in the matrix but are marked skipped:
-/// un-skip them once the JS engine can be driven headlessly.
-const _needsComicSources = <String>{
-  'CategoryComicsPage',
-  'ExplorePage',
-  'HomePage',
-  'LocalComicsPage',
-  'RankingPage',
-  'SearchResultPage',
-  'SettingsPage',
-};
-
-/// Pages that leave a long-lived timer running, which trips the framework's
-/// "timer is still pending" invariant when run in sequence. Not a layout
-/// defect (they render cleanly in isolation).
-const _flakyTimer = <String>{'AggregatedSearchPage'};
-
-const _comicSourceReason =
-    'requires ComicSourceManager / JsEngine isolate, unavailable in flutter test';
-const _timerReason = 'leaves a pending timer; fails when run in sequence';
-
-String? _skipReasonFor(String page) {
-  if (_needsComicSources.contains(page)) return _comicSourceReason;
-  if (_flakyTimer.contains(page)) return _timerReason;
-  return null;
-}
-
 void main() {
   setUpAll(() async {
     await initAppForTest();
   });
 
   for (final entry in _pages.entries) {
-    final reason = _skipReasonFor(entry.key);
     for (final config in layoutCases) {
-      final name = reason == null
-          ? '${entry.key} lays out on ${config.name}'
-          : '${entry.key} lays out on ${config.name} [$reason]';
+      final name = '${entry.key} lays out on ${config.name}';
       testWidgets(name, (tester) async {
         if (entry.key == 'WebDavComicsPage') {
           // An incomplete account exercises the setup UI without networking.
@@ -105,14 +73,29 @@ void main() {
             appdata.settings['webdavComicAccounts'] = previous;
           });
         }
-        final error = await renderPage(tester, entry.value(), config: config);
+        final error = await renderPage(
+          tester,
+          entry.value(),
+          config: config,
+          navigationShell: entry.key == 'ExplorePage',
+          expectedText:
+              const {
+                'AggregatedSearchPage',
+                'CategoryComicsPage',
+                'ExplorePage',
+                'RankingPage',
+                'SearchResultPage',
+              }.contains(entry.key)
+              ? 'Layout sample comic'
+              : null,
+        );
         expect(
           error,
           isNull,
           reason:
               '${entry.key} threw while rendering at ${config.name}: $error',
         );
-      }, skip: reason != null);
+      });
     }
   }
 }

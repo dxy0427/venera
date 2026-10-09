@@ -96,6 +96,8 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
 
   get _comicWidth => _kComicHeight * 0.7;
 
+  double get _comicHeight => SimpleComicTile.heightWithTitle(context) + 2;
+
   static const _kLeftPadding = 16.0;
 
   List<Comic>? comics;
@@ -144,7 +146,7 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
 
   Widget buildPlaceHolder() {
     return Container(
-      height: _kComicHeight,
+      height: _comicHeight,
       width: _comicWidth,
       margin: const EdgeInsets.only(left: _kLeftPadding),
       decoration: BoxDecoration(
@@ -184,7 +186,7 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
           ),
           if (isLoading)
             SizedBox(
-              height: _kComicHeight,
+              height: _comicHeight,
               width: double.infinity,
               child: Shimmer(
                 child: LayoutBuilder(
@@ -212,7 +214,7 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
             )
           else if (error != null || comics == null || comics!.isEmpty)
             SizedBox(
-              height: _kComicHeight,
+              height: _comicHeight,
               child: Column(
                 children: [
                   Row(
@@ -234,7 +236,7 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
             )
           else
             SizedBox(
-              height: _kComicHeight,
+              height: _comicHeight,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: [for (var c in comics!) buildComic(c)],

@@ -1440,6 +1440,17 @@ class SimpleComicTile extends StatelessWidget {
 
   final int? heroID;
 
+  static const coverHeight = 136.0;
+  static const _titleSpacing = 4.0;
+
+  static double heightWithTitle(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style;
+    final lineHeight = (style.fontSize ?? 14) * (style.height ?? 1.0);
+    return coverHeight +
+        _titleSpacing +
+        MediaQuery.textScalerOf(context).scale(lineHeight).ceilToDouble();
+  }
+
   @override
   Widget build(BuildContext context) {
     var image = _findImageProvider(comic);
@@ -1456,7 +1467,7 @@ class SimpleComicTile extends StatelessWidget {
 
     child = Container(
       width: 98,
-      height: 136,
+      height: coverHeight,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadius.md),
         color: Theme.of(context).colorScheme.secondaryContainer,
@@ -1492,7 +1503,7 @@ class SimpleComicTile extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           child,
-          const SizedBox(height: 4),
+          const SizedBox(height: _titleSpacing),
           SizedBox(
             width: 92,
             child: Center(
