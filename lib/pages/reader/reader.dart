@@ -47,8 +47,12 @@ import 'package:venera/utils/volume.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:venera/foundation/app_theme.dart';
 
 part 'scaffold.dart';
+part 'status_widgets.dart';
+part 'gallery_mode.dart';
+part 'continuous_mode.dart';
 
 part 'images.dart';
 

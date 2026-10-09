@@ -50,6 +50,13 @@ class _FollowUpdatesWidgetState
   void initState() {
     super.initState();
     getCount();
+    LocalFavoritesManager().addListener(updateCount);
+  }
+
+  @override
+  void dispose() {
+    LocalFavoritesManager().removeListener(updateCount);
+    super.dispose();
   }
 
   @override
@@ -76,7 +83,7 @@ class _FollowUpdatesWidgetState
                 ),
                 child: Text(
                   '@c updates'.tlParams({'c': _count}),
-                  style: ts.s16,
+                  style: context.textTheme.bodyLarge,
                 ),
               )
             : null,
@@ -134,6 +141,13 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
       sortComics();
       updatedComics = allComics.where((c) => c.hasNewUpdate).toList();
     }
+    LocalFavoritesManager().addListener(updateComics);
+  }
+
+  @override
+  void dispose() {
+    LocalFavoritesManager().removeListener(updateComics);
+    super.dispose();
   }
 
   @override
@@ -163,7 +177,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
             color: Theme.of(context).colorScheme.outlineVariant,
             width: 0.6,
           ),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,7 +188,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
             ),
             Text(
               "Choose a folder to follow updates.".tl,
-              style: ts.s16,
+              style: context.textTheme.bodyLarge,
             ).paddingHorizontal(16),
             const SizedBox(height: 8),
             FilledButton.tonal(
@@ -197,7 +211,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
             color: Theme.of(context).colorScheme.outlineVariant,
             width: 0.6,
           ),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -205,11 +219,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
             ListTile(leading: Icon(Icons.stars_outlined), title: Text(folder!)),
             Text(
               "Automatic update checking enabled.".tl,
-              style: ts.s14,
-            ).paddingHorizontal(16),
-            Text(
-              "The app will check for updates at most once a day.".tl,
-              style: ts.s14,
+              style: context.textTheme.bodyMedium,
             ).paddingHorizontal(16),
             const SizedBox(height: 8),
             Row(
@@ -252,7 +262,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
               children: [
                 Icon(Icons.update),
                 const SizedBox(width: 8),
-                Text("Updates".tl, style: ts.s18),
+                Text("Updates".tl, style: context.textTheme.titleMedium),
                 const Spacer(),
                 if (updatedComics.isNotEmpty)
                   IconButton(
@@ -303,11 +313,16 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
                   ),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(AppRadius.xl),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: [Text("No updates found".tl, style: ts.s16)],
+                    children: [
+                      Text(
+                        "No updates found".tl,
+                        style: context.textTheme.bodyLarge,
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -336,7 +351,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
               children: [
                 Icon(Icons.list),
                 const SizedBox(width: 8),
-                Text("All Comics".tl, style: ts.s18),
+                Text("All Comics".tl, style: context.textTheme.titleMedium),
               ],
             ),
           ),
@@ -557,7 +572,9 @@ abstract class FollowUpdatesService {
   static void initChecker() {
     if (_isInitialized) return;
     _isInitialized = true;
-    _check();
+    if (appdata.settings['comicUpdateCheckOnStart'] == true) {
+      _check();
+    }
     DataSync().addListener(updateFollowUpdatesUI);
     // A short interval will not affect the performance since every comic has a check time.
     Timer.periodic(const Duration(minutes: 10), (timer) {

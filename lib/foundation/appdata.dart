@@ -121,6 +121,7 @@ class Appdata with Init {
     "lastSyncTime",
     "imageFavoritesDisplayType",
     "commentFontSize",
+    "uiFontScale",
   ];
 
   static const _archiveSyncFields = ["backupWebdav", "backupWebdavPath"];
@@ -215,6 +216,8 @@ class Settings with ChangeNotifier {
 
   final _data = <String, dynamic>{
     'comicDisplayMode': 'detailed', // detailed, brief
+    // 分章节导出的章节段命名格式，见 ChapterExportNamingFormat
+    'chapterExportNamingFormat': 'ep', // ep, chinese, volume, number
     'comicTileScale': 1.00, // 0.75-1.25
     'color': 'system', // red, pink, purple, green, orange, blue
     'theme_mode': 'system', // light, dark, system
@@ -245,6 +248,10 @@ class Settings with ChangeNotifier {
     'enableLongPressToZoom': true,
     'longPressZoomPosition': "press", // press, center
     'checkUpdateOnStart': false,
+    // 漫画更新，区别于 APP 版本的 checkUpdateOnStart
+    'comicUpdateCheckOnStart': true,
+    'comicUpdateCheckInterval': '24', // 1/6/12/24/48/72 小时，字符串
+    'skipCheckIfHasNewUpdate': true,
     'limitImageWidth': true,
     'webdav': [], // empty means not configured
     'webdavProxyEnabled': true,
@@ -291,6 +298,7 @@ class Settings with ChangeNotifier {
     'imageFavoritesDisplayType': 0, // 0=Tags, 1=Authors, 2=Comics
     'showImageFavoritesChart':
         true, // show chart in image favorites card on home page
+    'uiFontScale': 1.0, // UI text scale multiplier, 0.85 - 1.30
   };
 
   operator [](String key) {

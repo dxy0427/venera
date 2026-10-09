@@ -152,7 +152,7 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
                     onTap: _navigateToRoot,
                     child: Text(
                       _breadcrumbs.last.name,
-                      style: ts.s16.copyWith(
+                      style: context.textTheme.bodyLarge?.copyWith(
                         color: context.colorScheme.primary,
                         decoration: TextDecoration.underline,
                       ),
@@ -209,9 +209,16 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
         children: [
           const Icon(Icons.error_outline, size: 48, color: Colors.red),
           const SizedBox(height: 16),
-          Text('Failed to load comics'.tl, style: ts.s18),
+          Text(
+            'Failed to load comics'.tl,
+            style: context.textTheme.titleMedium,
+          ),
           const SizedBox(height: 8),
-          Text(error, style: ts.s14, textAlign: TextAlign.center),
+          Text(
+            error,
+            style: context.textTheme.bodyMedium,
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () => _provider.refresh(),
@@ -229,11 +236,11 @@ class _WebDavComicsPageState extends State<WebDavComicsPage> {
         children: [
           const Icon(Icons.folder_open, size: 48),
           const SizedBox(height: 16),
-          Text('No comics found'.tl, style: ts.s18),
+          Text('No comics found'.tl, style: context.textTheme.titleMedium),
           const SizedBox(height: 8),
           Text(
             'Make sure the WebDAV path contains comic directories or archives.',
-            style: ts.s14,
+            style: context.textTheme.bodyMedium,
             textAlign: TextAlign.center,
           ),
         ],
@@ -448,12 +455,12 @@ class _WebDavComicCard extends StatelessWidget {
                     title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: ts.s14.bold,
+                    style: context.textTheme.titleSmall,
                   ),
                   if (comic.imageCount != null)
                     Text(
                       '${comic.imageCount} pages',
-                      style: ts.s12.copyWith(
+                      style: context.textTheme.bodySmall?.copyWith(
                         color: context.colorScheme.outline,
                       ),
                     ),

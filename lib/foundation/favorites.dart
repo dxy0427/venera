@@ -9,7 +9,6 @@ import 'package:venera/foundation/image_provider/local_favorite_image.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/sqlite_connection.dart';
-import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/utils/tags_translation.dart';
 import 'package:venera/utils/translations.dart';
 import 'dart:io';
@@ -1132,9 +1131,6 @@ class LocalFavoritesManager with ChangeNotifier {
           """,
           [newTime, id, type.value],
         );
-        if (followUpdatesFolder == folder) {
-          updateFollowUpdatesUI();
-        }
       }
     }
     notifyListeners();

@@ -271,8 +271,7 @@ class ComicTile extends StatelessWidget {
                           history.maxPage,
                           history.ep,
                         ),
-                        style: const TextStyle(
-                          fontSize: 12,
+                        style: context.textTheme.labelMedium?.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
                           height: 1,
@@ -638,7 +637,7 @@ class _ComicDescription extends StatelessWidget {
       children: <Widget>[
         Text(
           title.trim(),
-          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14.0),
+          style: context.textTheme.titleSmall,
           maxLines: maxLines,
           overflow: TextOverflow.ellipsis,
           softWrap: true,
@@ -646,8 +645,7 @@ class _ComicDescription extends StatelessWidget {
         if (subtitle != "")
           Text(
             subtitle,
-            style: TextStyle(
-              fontSize: 10.0,
+            style: context.textTheme.labelSmall?.copyWith(
               color: context.colorScheme.onSurface.toOpacity(0.7),
             ),
             maxLines: 1,
@@ -659,13 +657,20 @@ class _ComicDescription extends StatelessWidget {
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                if (constraints.maxHeight < 22) {
+                // Tag chip height and row packing follow the scaled type
+                // ramp so the chips never clip the label at large text sizes.
+                final tagLineHeight = MediaQuery.textScalerOf(
+                  context,
+                ).scale(16);
+                final tagHeight = tagLineHeight + 5;
+                final tagSpacing = tagHeight + 3;
+                if (constraints.maxHeight < tagHeight) {
                   return Container();
                 }
-                int cnt = (constraints.maxHeight - 22).toInt() ~/ 25;
+                int cnt = (constraints.maxHeight - tagHeight) ~/ tagSpacing;
                 return Container(
                   clipBehavior: Clip.antiAlias,
-                  height: 21 + cnt * 24,
+                  height: tagHeight + cnt * tagSpacing,
                   width: double.infinity,
                   decoration: const BoxDecoration(),
                   child: Wrap(
@@ -677,7 +682,7 @@ class _ComicDescription extends StatelessWidget {
                     children: [
                       for (var s in tags!)
                         Container(
-                          height: 21,
+                          height: tagHeight,
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           constraints: BoxConstraints(
                             maxWidth: constraints.maxWidth * 0.45,
@@ -694,7 +699,11 @@ class _ComicDescription extends StatelessWidget {
                               enableTranslate
                                   ? TagsTranslation.translateTag(s)
                                   : s.split(':').last,
-                              style: const TextStyle(fontSize: 12),
+                              style: context.textTheme.labelMedium?.copyWith(
+                                color: s == "Unavailable"
+                                    ? context.colorScheme.onErrorContainer
+                                    : context.colorScheme.onSecondaryContainer,
+                              ),
                               softWrap: true,
                               overflow: TextOverflow.ellipsis,
                               maxLines: 1,
@@ -719,7 +728,7 @@ class _ComicDescription extends StatelessWidget {
                   if (rating != null) StarRating(value: rating!, size: 18),
                   Text(
                     description,
-                    style: const TextStyle(fontSize: 12.0),
+                    style: context.textTheme.bodySmall,
                     maxLines: (tags == null || tags!.isEmpty) ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -738,7 +747,9 @@ class _ComicDescription extends StatelessWidget {
                 child: Center(
                   child: Text(
                     "${badge![0].toUpperCase()}${badge!.substring(1).toLowerCase()}",
-                    style: const TextStyle(fontSize: 12),
+                    style: context.textTheme.labelMedium?.copyWith(
+                      color: context.colorScheme.onTertiaryContainer,
+                    ),
                   ),
                 ),
               ),
@@ -781,6 +792,7 @@ class SliverGridComics extends StatefulWidget {
     this.onTap,
     this.onLongPressed,
     this.selections,
+    this.listenToManagers = true,
   });
 
   final List<Comic> comics;
@@ -796,6 +808,13 @@ class SliverGridComics extends StatefulWidget {
   final void Function(Comic, int heroID)? onTap;
 
   final void Function(Comic, int heroID)? onLongPressed;
+
+  /// Whether to listen to HistoryManager and LocalFavoritesManager.
+  ///
+  /// Set to false when the parent already rebuilds this widget on those
+  /// changes; listening again would trigger a redundant rebuild that can drop
+  /// this widget's state (scroll position).
+  final bool listenToManagers;
 
   @override
   State<SliverGridComics> createState() => _SliverGridComicsState();
@@ -836,16 +855,44 @@ class _SliverGridComicsState extends State<SliverGridComics> {
       }
     }
     generateHeroID();
-    HistoryManager().addListener(update);
-    LocalFavoritesManager().addListener(update);
+    if (widget.listenToManagers) {
+      HistoryManager().addListener(update);
+      LocalFavoritesManager().addListener(update);
+    }
+    // Listened to regardless of [SliverGridComics.listenToManagers]: the
+    // manager listeners are owned by the parent, but blocked-word filtering
+    // lives here and must react to any settings write.
+    appdata.settings.addListener(_onSettingsChanged);
     super.initState();
   }
 
   @override
   void dispose() {
-    HistoryManager().removeListener(update);
-    LocalFavoritesManager().removeListener(update);
+    if (widget.listenToManagers) {
+      HistoryManager().removeListener(update);
+      LocalFavoritesManager().removeListener(update);
+    }
+    appdata.settings.removeListener(_onSettingsChanged);
     super.dispose();
+  }
+
+  void _onSettingsChanged() {
+    final newComics = <Comic>[];
+    for (var comic in widget.comics) {
+      if (isBlocked(comic) == null) {
+        newComics.add(comic);
+      }
+    }
+    // Settings notify on every write; only rebuild when the filtered result
+    // actually changed, so unrelated settings keep the scroll position.
+    if (!newComics.isEqualTo(comics)) {
+      setState(() {
+        comics
+          ..clear()
+          ..addAll(newComics);
+        generateHeroID();
+      });
+    }
   }
 
   void update() {
@@ -1373,282 +1420,6 @@ class ComicListState extends State<ComicList> {
         if (widget.trailingSliver != null) widget.trailingSliver!,
       ],
     );
-  }
-}
-
-class StarRating extends StatelessWidget {
-  const StarRating({
-    super.key,
-    required this.value,
-    this.onTap,
-    this.size = 20,
-  });
-
-  final double value; // 0-5
-
-  final VoidCallback? onTap;
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    var interval = size * 0.1;
-    var value = this.value;
-    if (value.isNaN) {
-      value = 0;
-    }
-    var child = SizedBox(
-      height: size,
-      width: size * 5 + interval * 4,
-      child: Row(
-        children: [
-          for (var i = 0; i < 5; i++)
-            _Star(
-              value: (value - i).clamp(0.0, 1.0),
-              size: size,
-            ).paddingRight(i == 4 ? 0 : interval),
-        ],
-      ),
-    );
-    return onTap == null ? child : GestureDetector(onTap: onTap, child: child);
-  }
-}
-
-class _Star extends StatelessWidget {
-  const _Star({required this.value, required this.size});
-
-  final double value; // 0-1
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        children: [
-          Icon(
-            Icons.star_outline,
-            size: size,
-            color: context.colorScheme.secondary,
-          ),
-          ClipRect(
-            clipper: _StarClipper(value),
-            child: Icon(
-              Icons.star,
-              size: size,
-              color: context.colorScheme.secondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StarClipper extends CustomClipper<Rect> {
-  final double value;
-
-  _StarClipper(this.value);
-
-  @override
-  Rect getClip(Size size) {
-    return Rect.fromLTWH(0, 0, size.width * value, size.height);
-  }
-
-  @override
-  bool shouldReclip(covariant CustomClipper<Rect> oldClipper) {
-    return oldClipper is! _StarClipper || oldClipper.value != value;
-  }
-}
-
-class RatingWidget extends StatefulWidget {
-  /// star number
-  final int count;
-
-  /// Max score
-  final double maxRating;
-
-  /// Current score value
-  final double value;
-
-  /// Star size
-  final double size;
-
-  /// Space between the stars
-  final double padding;
-
-  /// Whether the score can be modified by sliding
-  final bool selectable;
-
-  /// Callbacks when ratings change
-  final ValueChanged<double> onRatingUpdate;
-
-  const RatingWidget({
-    super.key,
-    this.maxRating = 10.0,
-    this.count = 5,
-    this.value = 10.0,
-    this.size = 20,
-    required this.padding,
-    this.selectable = false,
-    required this.onRatingUpdate,
-  });
-
-  @override
-  State<RatingWidget> createState() => _RatingWidgetState();
-}
-
-class _RatingWidgetState extends State<RatingWidget> {
-  double value = 10;
-
-  @override
-  Widget build(BuildContext context) {
-    return Listener(
-      onPointerDown: (PointerDownEvent event) {
-        double x = event.localPosition.dx;
-        if (x < 0) x = 0;
-        pointValue(x);
-      },
-      onPointerMove: (PointerMoveEvent event) {
-        double x = event.localPosition.dx;
-        if (x < 0) x = 0;
-        pointValue(x);
-      },
-      onPointerUp: (_) {},
-      behavior: HitTestBehavior.deferToChild,
-      child: buildRowRating(),
-    );
-  }
-
-  pointValue(double dx) {
-    if (!widget.selectable) {
-      return;
-    }
-    if (dx >=
-        widget.size * widget.count + widget.padding * (widget.count - 1)) {
-      value = widget.maxRating;
-    } else {
-      for (double i = 1; i < widget.count + 1; i++) {
-        if (dx > widget.size * i + widget.padding * (i - 1) &&
-            dx < widget.size * i + widget.padding * i) {
-          value = i * (widget.maxRating / widget.count);
-          break;
-        } else if (dx > widget.size * (i - 1) + widget.padding * (i - 1) &&
-            dx < widget.size * i + widget.padding * i) {
-          value =
-              (dx - widget.padding * (i - 1)) /
-              (widget.size * widget.count) *
-              widget.maxRating;
-          break;
-        }
-      }
-    }
-    if (value % 1 >= 0.5) {
-      value = value ~/ 1 + 1;
-    } else {
-      value = (value ~/ 1).toDouble();
-    }
-    if (value < 0) {
-      value = 0;
-    } else if (value > 10) {
-      value = 10;
-    }
-    setState(() {
-      widget.onRatingUpdate(value);
-    });
-  }
-
-  int fullStars() {
-    return (value / (widget.maxRating / widget.count)).floor();
-  }
-
-  double star() {
-    if (widget.count / fullStars() == widget.maxRating / value) {
-      return 0;
-    }
-    return (value % (widget.maxRating / widget.count)) /
-        (widget.maxRating / widget.count);
-  }
-
-  List<Widget> buildRow() {
-    int full = fullStars();
-    List<Widget> children = [];
-    for (int i = 0; i < full; i++) {
-      children.add(
-        Icon(
-          Icons.star,
-          size: widget.size,
-          color: context.colorScheme.secondary,
-        ),
-      );
-      if (i < widget.count - 1) {
-        children.add(SizedBox(width: widget.padding));
-      }
-    }
-    if (full < widget.count) {
-      children.add(
-        ClipRect(
-          clipper: _SMClipper(rating: star() * widget.size),
-          child: Icon(
-            Icons.star,
-            size: widget.size,
-            color: context.colorScheme.secondary,
-          ),
-        ),
-      );
-    }
-
-    return children;
-  }
-
-  List<Widget> buildNormalRow() {
-    List<Widget> children = [];
-    for (int i = 0; i < widget.count; i++) {
-      children.add(
-        Icon(
-          Icons.star_border,
-          size: widget.size,
-          color: context.colorScheme.secondary,
-        ),
-      );
-      if (i < widget.count - 1) {
-        children.add(SizedBox(width: widget.padding));
-      }
-    }
-    return children;
-  }
-
-  Widget buildRowRating() {
-    return Stack(
-      children: <Widget>[
-        Row(children: buildNormalRow()),
-        Row(children: buildRow()),
-      ],
-    );
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    value = widget.value;
-  }
-}
-
-class _SMClipper extends CustomClipper<Rect> {
-  final double rating;
-
-  _SMClipper({required this.rating});
-
-  @override
-  Rect getClip(Size size) {
-    return Rect.fromLTRB(0.0, 0.0, rating, size.height);
-  }
-
-  @override
-  bool shouldReclip(_SMClipper oldClipper) {
-    return rating != oldClipper.rating;
   }
 }
 

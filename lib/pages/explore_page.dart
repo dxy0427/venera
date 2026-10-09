@@ -3,6 +3,7 @@ import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/pages/page_jump.dart';
 import 'package:venera/foundation/global_state.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/pages/comic_source_page.dart';
@@ -128,11 +129,10 @@ class _ExplorePageState extends State<ExplorePage>
       msg += "Please check your settings".tl;
       onTap = addPage;
     }
-    return NetworkError(
+    return EmptyState(
       message: msg,
-      retry: onTap,
-      withAppbar: false,
-      buttonText: "Manage".tl,
+      icon: Icons.travel_explore_outlined,
+      action: FilledButton(onPressed: onTap, child: Text("Manage".tl)),
     );
   }
 
@@ -386,7 +386,7 @@ class _MixedExplorePageState
           yield const SliverToBoxAdapter(child: Divider());
           cache.clear();
         }
-        yield* _buildExplorePagePart(part, widget.sourceKey);
+        yield* _buildExplorePagePart(context, part, widget.sourceKey);
         yield const SliverToBoxAdapter(child: Divider());
       } else {
         cache.addAll(part as List<Comic>);
@@ -424,6 +424,7 @@ class _MixedExplorePageState
 }
 
 Iterable<Widget> _buildExplorePagePart(
+  BuildContext context,
   ExplorePagePart part,
   String sourceKey,
 ) sync* {
@@ -435,13 +436,7 @@ Iterable<Widget> _buildExplorePagePart(
           padding: const EdgeInsets.fromLTRB(16, 10, 5, 10),
           child: Row(
             children: [
-              Text(
-                part.title,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              Text(part.title, style: context.textTheme.titleMedium),
               const Spacer(),
               if (part.viewMore != null)
                 TextButton(
@@ -581,7 +576,7 @@ class _MultiPartExplorePageState extends State<_MultiPartExplorePage> {
 
   Iterable<Widget> _buildPage() sync* {
     for (var part in parts!) {
-      yield* _buildExplorePagePart(part, widget.comicSourceKey);
+      yield* _buildExplorePagePart(context, part, widget.comicSourceKey);
     }
   }
 }

@@ -3,12 +3,14 @@ import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/pages/page_jump.dart';
 import 'package:venera/pages/ranking_page.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/translations.dart';
 
 import 'comic_source_page.dart';
+import 'package:venera/foundation/app_theme.dart';
 
 class CategoriesPage extends StatefulWidget {
   const CategoriesPage({super.key});
@@ -87,11 +89,10 @@ class _CategoriesPageState extends State<CategoriesPage>
       msg += "Please check your settings".tl;
       onTap = addPage;
     }
-    return NetworkError(
+    return EmptyState(
       message: msg,
-      retry: onTap,
-      withAppbar: false,
-      buttonText: "Manage".tl,
+      icon: Icons.category_outlined,
+      action: FilledButton(onPressed: onTap, child: Text("Manage".tl)),
     );
   }
 
@@ -160,7 +161,7 @@ class _CategoryPage extends StatelessWidget {
   Widget build(BuildContext context) {
     var children = <Widget>[];
     if (data.enableRankingPage || data.buttons.isNotEmpty) {
-      children.add(buildTitle(data.title));
+      children.add(buildTitle(context, data.title));
       children.add(
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
@@ -187,7 +188,11 @@ class _CategoryPage extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  buildTitleWithRefresh(part.title, () => updater(() {})),
+                  buildTitleWithRefresh(
+                    context,
+                    part.title,
+                    () => updater(() {}),
+                  ),
                   buildTags(part.categories),
                 ],
               );
@@ -195,7 +200,7 @@ class _CategoryPage extends StatelessWidget {
           ),
         );
       } else {
-        children.add(buildTitle(part.title));
+        children.add(buildTitle(context, part.title));
         children.add(buildTags(part.categories));
       }
     }
@@ -207,25 +212,23 @@ class _CategoryPage extends StatelessWidget {
     );
   }
 
-  Widget buildTitle(String title) {
+  Widget buildTitle(BuildContext context, String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 5, 10),
-      child: Text(
-        title.tl,
-        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-      ),
+      child: Text(title.tl, style: context.textTheme.titleMedium),
     );
   }
 
-  Widget buildTitleWithRefresh(String title, void Function() onRefresh) {
+  Widget buildTitleWithRefresh(
+    BuildContext context,
+    String title,
+    void Function() onRefresh,
+  ) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 5, 10),
       child: Row(
         children: [
-          Text(
-            title.tl,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-          ),
+          Text(title.tl, style: context.textTheme.titleMedium),
           const Spacer(),
           IconButton(onPressed: onRefresh, icon: const Icon(Icons.refresh)),
         ],
@@ -258,10 +261,12 @@ class _CategoryPage extends StatelessWidget {
       child: Builder(
         builder: (context) {
           return Material(
-            borderRadius: const BorderRadius.all(Radius.circular(8)),
+            borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
             color: context.colorScheme.primaryContainer.toOpacity(0.72),
             child: InkWell(
-              borderRadius: const BorderRadius.all(Radius.circular(8)),
+              borderRadius: const BorderRadius.all(
+                Radius.circular(AppRadius.md),
+              ),
               onTap: onClick,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),

@@ -24,13 +24,17 @@ import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 import 'package:yaml/yaml.dart';
 import 'package:pub_semver/pub_semver.dart';
+import 'package:venera/foundation/app_theme.dart';
+import 'package:venera/foundation/consts.dart';
 
 part 'reader.dart';
 part 'explore_settings.dart';
 part 'setting_components.dart';
 part 'appearance.dart';
 part 'local_favorites.dart';
+part 'updates.dart';
 part 'app.dart';
+part 'webdav.dart';
 part 'auth_pin_setting.dart';
 part 'about.dart';
 part 'network.dart';
@@ -50,10 +54,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   ColorScheme get colors => Theme.of(context).colorScheme;
 
-  bool get enableTwoViews => context.width > 720;
+  bool get enableTwoViews => context.width > changePointTwoPane;
 
   final categories = <String>[
     "Explore",
+    "Updates",
     "Reading",
     "Appearance",
     "Local Favorites",
@@ -65,6 +70,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   final icons = <IconData>[
     Icons.explore,
+    Icons.update,
     Icons.book,
     Icons.color_lens,
     Icons.collections_bookmark_rounded,
@@ -159,7 +165,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(width: 24),
-                Text("Settings".tl, style: ts.s20),
+                Text("Settings".tl, style: context.textTheme.titleLarge),
               ],
             ),
           ),
@@ -193,7 +199,7 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             Icon(icons[id]),
             const SizedBox(width: 16),
-            Text(name, style: ts.s16),
+            Text(name, style: context.textTheme.bodyLarge),
             const Spacer(),
             if (selected) const Icon(Icons.arrow_right),
           ],
@@ -243,13 +249,14 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildSettingsContent(int pageIndex) {
     return switch (pageIndex) {
       0 => const ExploreSettings(),
-      1 => const ReaderSettings(),
-      2 => const AppearanceSettings(),
-      3 => const LocalFavoritesSettings(),
-      4 => const AppSettings(),
-      5 => const NetworkSettings(),
-      6 => const AboutSettings(),
-      7 => const DebugPage(),
+      1 => const UpdatesSettings(),
+      2 => const ReaderSettings(),
+      3 => const AppearanceSettings(),
+      4 => const LocalFavoritesSettings(),
+      5 => const AppSettings(),
+      6 => const NetworkSettings(),
+      7 => const AboutSettings(),
+      8 => const DebugPage(),
       _ => throw UnimplementedError(),
     };
   }
@@ -268,13 +275,14 @@ class _SettingsDetailPage extends StatelessWidget {
   Widget _buildPage() {
     return switch (pageIndex) {
       0 => const ExploreSettings(),
-      1 => const ReaderSettings(),
-      2 => const AppearanceSettings(),
-      3 => const LocalFavoritesSettings(),
-      4 => const AppSettings(),
-      5 => const NetworkSettings(),
-      6 => const AboutSettings(),
-      7 => const DebugPage(),
+      1 => const UpdatesSettings(),
+      2 => const ReaderSettings(),
+      3 => const AppearanceSettings(),
+      4 => const LocalFavoritesSettings(),
+      5 => const AppSettings(),
+      6 => const NetworkSettings(),
+      7 => const AboutSettings(),
+      8 => const DebugPage(),
       _ => throw UnimplementedError(),
     };
   }

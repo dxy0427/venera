@@ -255,7 +255,10 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                 _buildSectionHeader('Accounts'.tl),
                 const SizedBox(height: 8),
                 if (_accounts.isEmpty)
-                  Text('No accounts. Fill the form and save.'.tl, style: ts.s14)
+                  Text(
+                    'No accounts. Fill the form and save.'.tl,
+                    style: context.textTheme.bodyMedium,
+                  )
                 else
                   ..._accounts.map((a) {
                     final selected = !_editingNew && a.id == _activeId;
@@ -278,8 +281,8 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                       trailing: selected
                           ? Text(
                               'Active'.tl,
-                              style: ts.s12.withColor(
-                                context.colorScheme.primary,
+                              style: context.textTheme.bodySmall?.copyWith(
+                                color: context.colorScheme.primary,
                               ),
                             )
                           : null,
@@ -432,15 +435,18 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                       Text(
                         'You can add multiple WebDAV accounts with different names, '
                         'switch the active account, then browse comics from that server.',
-                        style: ts.s14,
+                        style: context.textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 8),
-                      Text('Supported formats:'.tl, style: ts.s14.bold),
+                      Text(
+                        'Supported formats:'.tl,
+                        style: context.textTheme.titleSmall,
+                      ),
                       Text(
                         '• Directory with image files (jpg, png, webp, etc.)\n'
                         '• Directory with chapter subdirectories\n'
                         '• CBZ/ZIP archive files',
-                        style: ts.s14,
+                        style: context.textTheme.bodyMedium,
                       ),
                     ],
                   ),
@@ -456,7 +462,9 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
   Widget _buildSectionHeader(String title) {
     return Text(
       title,
-      style: ts.s18.bold.withColor(context.colorScheme.primary),
+      style: context.textTheme.titleMedium?.copyWith(
+        color: context.colorScheme.primary,
+      ),
     );
   }
 
@@ -618,7 +626,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
                   Expanded(
                     child: Text(
                       _currentPath,
-                      style: ts.s14,
+                      style: context.textTheme.bodyMedium,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -642,7 +650,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
                           const SizedBox(height: 8),
                           Text(
                             _error!,
-                            style: ts.s14,
+                            style: context.textTheme.bodyMedium,
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 8),
@@ -657,7 +665,7 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
                   ? Center(
                       child: Text(
                         'No subdirectories'.tl,
-                        style: ts.s14.copyWith(
+                        style: context.textTheme.bodyMedium?.copyWith(
                           color: context.colorScheme.outline,
                         ),
                       ),
