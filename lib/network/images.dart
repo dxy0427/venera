@@ -12,6 +12,7 @@ import 'package:venera/utils/image.dart';
 import 'package:venera/utils/local_cbz.dart';
 
 import 'app_dio.dart';
+import 'source_request_context.dart';
 
 abstract class ImageDownloader {
   @visibleForTesting
@@ -209,6 +210,27 @@ abstract class ImageDownloader {
     String eid, {
     CancelToken? cancelToken,
   }) async* {
+    final context = SourceRequestContext(cancelToken ?? CancelToken());
+    try {
+      yield* _loadComicImageWithContext(imageKey, sourceKey, cid, eid, context);
+    } catch (_) {
+      // JS rejections are strings. Preserve cancellation as a typed error so
+      // the image provider does not retry or display it as a network failure.
+      _checkCancelled(context.cancelToken);
+      rethrow;
+    } finally {
+      context.dispose();
+    }
+  }
+
+  static Stream<ImageDownloadProgress> _loadComicImageWithContext(
+    String imageKey,
+    String? sourceKey,
+    String cid,
+    String eid,
+    SourceRequestContext context,
+  ) async* {
+    final cancelToken = context.cancelToken;
     _checkCancelled(cancelToken);
     // WebDAV owns its disk cache and invalidation keys; don't duplicate pages.
     if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
@@ -281,7 +303,12 @@ abstract class ImageDownloader {
         throw "Comic source is no longer available.";
       }
       configs =
-          (await comicSource.getImageLoadingConfig?.call(imageKey, cid, eid)) ??
+          (await comicSource.getImageLoadingConfig?.call(
+            imageKey,
+            cid,
+            eid,
+            requestId: context.id,
+          )) ??
           {};
     }
     var retryLimit = 5;

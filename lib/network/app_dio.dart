@@ -142,41 +142,92 @@ class AppDio with DioMixin {
     }
   }
 
-  static final Map<String, bool> _requests = {};
+  static final Map<String, Completer<void>> _requests = {};
 
   @override
-  Future<Response<T>> request<T>(
-    String path, {
-    Object? data,
-    Map<String, dynamic>? queryParameters,
-    CancelToken? cancelToken,
-    Options? options,
-    ProgressCallback? onSendProgress,
-    ProgressCallback? onReceiveProgress,
-  }) async {
-    if (options?.headers?['prevent-parallel'] == 'true') {
-      while (_requests.containsKey(path)) {
-        await Future.delayed(const Duration(milliseconds: 20));
-      }
-      _requests[path] = true;
-      options!.headers!.remove('prevent-parallel');
+  Future<Response<T>> fetch<T>(RequestOptions requestOptions) async {
+    final headers = Map<String, dynamic>.from(requestOptions.headers);
+    var serialize = false;
+    headers.removeWhere((key, value) {
+      if (key.toLowerCase() != 'prevent-parallel') return false;
+      serialize = value.toString() == 'true';
+      return true;
+    });
+    final options = requestOptions.copyWith(headers: headers);
+    if (!serialize) return super.fetch<T>(options);
+
+    // Queue by the resolved URL, across Dio instances. Cancelled waiters stay
+    // in the chain until their predecessor finishes, so they cannot unlock it.
+    final key = options.uri.replace(fragment: '').toString();
+    final previous = _requests[key];
+    final lease = Completer<void>();
+    _requests[key] = lease;
+    final token = options.cancelToken;
+    var acquired = false;
+    var streaming = false;
+    void release() {
+      if (identical(_requests[key], lease)) _requests.remove(key);
+      if (!lease.isCompleted) lease.complete();
     }
+
     try {
-      return super.request<T>(
-        path,
-        data: data,
-        queryParameters: queryParameters,
-        cancelToken: cancelToken,
-        options: options,
-        onSendProgress: onSendProgress,
-        onReceiveProgress: onReceiveProgress,
-      );
+      if (previous != null) {
+        await Future.any<void>([
+          previous.future,
+          if (token != null) token.whenCancel.then((error) => throw error),
+        ]);
+      }
+      if (token?.isCancelled == true) throw token!.cancelError!;
+      acquired = true;
+      final response = await super.fetch<T>(options);
+      final body = response.data;
+      if (body is ResponseBody) {
+        body.stream = _releaseAfterStream(body.stream, release);
+        streaming = true;
+        token?.whenCancel.then((_) => release());
+      }
+      return response;
     } finally {
-      if (_requests.containsKey(path)) {
-        _requests.remove(path);
+      if (!streaming) {
+        if (!acquired && previous != null) {
+          unawaited(previous.future.then((_) => release()));
+        } else {
+          release();
+        }
       }
     }
   }
+}
+
+Stream<Uint8List> _releaseAfterStream(
+  Stream<Uint8List> stream,
+  void Function() release,
+) {
+  late StreamSubscription<Uint8List> subscription;
+  final controller = StreamController<Uint8List>();
+  controller.onListen = () {
+    subscription = stream.listen(
+      controller.add,
+      onError: (Object error, StackTrace stack) {
+        release();
+        controller.addError(error, stack);
+      },
+      onDone: () {
+        release();
+        controller.close();
+      },
+    );
+  };
+  controller.onPause = () => subscription.pause();
+  controller.onResume = () => subscription.resume();
+  controller.onCancel = () async {
+    try {
+      await subscription.cancel();
+    } finally {
+      release();
+    }
+  };
+  return controller.stream;
 }
 
 class RHttpAdapter implements HttpClientAdapter {

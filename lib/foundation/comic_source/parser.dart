@@ -127,8 +127,10 @@ class ComicSourceParser {
     _key = key;
     _checkKeyValidation();
 
+    // Do not marshal the assignment result (the entire source and its JS
+    // callbacks) into Dart only to discard it.
     JsEngine().runCode("""
-      ComicSource.sources.$_key = this['temp'];
+      void (ComicSource.sources.$_key = this['temp']);
     """);
 
     var source = ComicSource(
@@ -1064,10 +1066,11 @@ class ComicSourceParser {
     if (!_checkExists("comic.onImageLoad")) {
       return null;
     }
-    return (imageKey, comicId, ep) async {
+    return (imageKey, comicId, ep, {requestId}) async {
       var res = JsEngine().runCode("""
           ComicSource.sources.$_key.comic.onImageLoad(
-            ${jsonEncode(imageKey)}, ${jsonEncode(comicId)}, ${jsonEncode(ep)})
+            ${jsonEncode(imageKey)}, ${jsonEncode(comicId)}, ${jsonEncode(ep)},
+            undefined, Network.forRequest(${jsonEncode(requestId)}))
         """);
       if (res is Future) {
         return await res;

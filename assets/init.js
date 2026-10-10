@@ -459,6 +459,11 @@ function Cookie({name, value, domain}) {
  * @namespace Network
  */
 let Network = {
+    // Internal operation context, explicitly passed through source helpers.
+    forRequest(requestId) {
+        if (requestId == null) return this;
+        return Object.assign(Object.create(this), {_requestId: requestId});
+    },
     /**
      * Sends an HTTP request.
      * @param {string} method - The HTTP method (e.g., GET, POST, PUT, PATCH, DELETE).
@@ -473,6 +478,7 @@ let Network = {
             method: 'http',
             http_method: method,
             bytes: true,
+            requestId: this._requestId,
             url: url,
             headers: headers,
             data: data,
@@ -499,6 +505,7 @@ let Network = {
         let result = await sendMessage({
             method: 'http',
             http_method: method,
+            requestId: this._requestId,
             url: url,
             headers: headers,
             data: data,

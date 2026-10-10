@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:crypto/crypto.dart';
 import 'package:dio/io.dart';
 import 'package:enough_convert/enough_convert.dart';
-import 'package:flutter/foundation.dart' show protected;
+import 'package:flutter/foundation.dart' show protected, visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:html/parser.dart' as html;
 import 'package:html/dom.dart' as dom;
@@ -28,6 +28,7 @@ import 'package:venera/foundation/js_pool.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/network/cookie_jar.dart';
 import 'package:venera/network/proxy.dart';
+import 'package:venera/network/source_request_context.dart';
 import 'package:venera/utils/init.dart';
 
 import 'comic_source/comic_source.dart';
@@ -57,6 +58,9 @@ class JsEngine with _JSEngineApi, JsUiApi, Init {
   bool _closed = true;
 
   Dio? _dio;
+
+  @visibleForTesting
+  void setHttpClientForTesting(Dio client) => _dio = client;
 
   static void reset() {
     var old = _cache;
@@ -226,6 +230,9 @@ class JsEngine with _JSEngineApi, JsUiApi, Init {
     String? error;
 
     try {
+      final cancelToken = SourceRequestContext.tokenFor(
+        req['requestId'] as String?,
+      );
       var headers = Map<String, dynamic>.from(req["headers"] ?? {});
       var extra = Map<String, dynamic>.from(req["extra"] ?? {});
       if (headers["user-agent"] == null && headers["User-Agent"] == null) {
@@ -233,7 +240,7 @@ class JsEngine with _JSEngineApi, JsUiApi, Init {
       }
       var dio = _dio;
       if (headers['http_client'] == "dart:io") {
-        dio = Dio(
+        dio = AppDio(
           BaseOptions(
             responseType: ResponseType.plain,
             validateStatus: (status) => true,
@@ -243,14 +250,18 @@ class JsEngine with _JSEngineApi, JsUiApi, Init {
         dio.httpClientAdapter = IOHttpClientAdapter(
           createHttpClient: () => createDartIoHttpClient(proxy),
         );
-        dio.interceptors.add(
-          CookieManagerSql(SingleInstanceCookieJar.instance!),
-        );
+        dio.interceptors.clear();
+        if (SingleInstanceCookieJar.instance != null) {
+          dio.interceptors.add(
+            CookieManagerSql(SingleInstanceCookieJar.instance!),
+          );
+        }
         dio.interceptors.add(LogInterceptor());
       }
       response = await dio!.request(
         req["url"],
         data: req["data"],
+        cancelToken: cancelToken,
         options: Options(
           method: req['http_method'],
           responseType: req["bytes"] == true

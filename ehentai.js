@@ -7,7 +7,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.5.4"
+    version = "1.5.5"
 
     minAppVersion = "1.5.3"
 
@@ -1049,12 +1049,12 @@ class Ehentai extends ComicSource {
          * @param next {string?} - next page token, null for first page
          * @returns {Promise<{thumbnails: string[], next: string?, urls: string[]}>} - `next` is next page token, null for no more
          */
-        loadThumbnails: async (id, next) => {
+        loadThumbnails: async (id, next, network = Network) => {
             let url = id
             if(next != null) {
                 url += `?p=${next}`
             }
-            let res = await Network.get(url, {
+            let res = await network.get(url, {
                 'cache-time': 'long',
                 'prevent-parallel': 'true',
                 'cookie': 'nw=1'
@@ -1146,8 +1146,8 @@ class Ehentai extends ComicSource {
             return 'ok'
         },
 
-        getKey: async (url) => {
-            let res = await Network.get(url, {
+        getKey: async (url, network = Network) => {
+            let res = await network.get(url, {
                 'cache-time': 'long',
                 'prevent-parallel': 'true',
             })
@@ -1193,14 +1193,14 @@ class Ehentai extends ComicSource {
          * @param nl
          * @returns {{}}
          */
-        onImageLoad: async (image, comicId, epId, nl) => {
-            let first = await this.comic.loadThumbnails(comicId)
-            let key = await this.comic.getKey(first.urls[0])
+        onImageLoad: async (image, comicId, epId, nl, network = Network) => {
+            let first = await this.comic.loadThumbnails(comicId, undefined, network)
+            let key = await this.comic.getKey(first.urls[0], network)
             let page = Number(image)
 
             let getImageFromApi = async (nl) => {
                 if(key.mpvkey) {
-                    let res = await Network.post(this.apiUrl, {
+                    let res = await network.post(this.apiUrl, {
                         'Content-Type': 'application/json',
                     }, {
                         'gid': this.parseUrl(comicId).id,
@@ -1228,11 +1228,11 @@ class Ehentai extends ComicSource {
                         let shouldLoadPage = Math.floor(page / onePageLength)
                         let index = page % onePageLength
                         let thumbnails =
-                            await this.comic.loadThumbnails(comicId, shouldLoadPage.toString())
+                            await this.comic.loadThumbnails(comicId, shouldLoadPage.toString(), network)
                         url = thumbnails.urls[index]
                     }
 
-                    let res = await Network.post(this.apiUrl, {
+                    let res = await network.post(this.apiUrl, {
                         'Content-Type': 'application/json',
                     }, {
                         'gid': this.parseUrl(comicId).id,
@@ -1261,7 +1261,7 @@ class Ehentai extends ComicSource {
 
             if(res.nl) {
                 onLoadFailed = async () => {
-                    return this.comic.onImageLoad(image, comicId, epId, res.nl)
+                    return this.comic.onImageLoad(image, comicId, epId, res.nl, network)
                 }
             }
 

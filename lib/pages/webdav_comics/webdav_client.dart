@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:webdav_client/webdav_client.dart' as webdav;
 import 'package:venera/foundation/appdata.dart';
@@ -32,7 +33,25 @@ const _archiveExtensions = {'.cbz', '.zip'};
 class WebDavComicClient {
   final WebDavAccount account;
 
-  WebDavComicClient(this.account);
+  WebDavComicClient(this.account, {HttpClientAdapter? imageAdapter}) {
+    _imageDio =
+        Dio(
+            BaseOptions(
+              responseType: ResponseType.bytes,
+              connectTimeout: const Duration(seconds: 15),
+              receiveTimeout: const Duration(seconds: 15),
+              sendTimeout: const Duration(seconds: 15),
+              validateStatus: (status) => status == 200,
+            ),
+          )
+          ..httpClientAdapter =
+              imageAdapter ??
+              RHttpAdapter(
+                enableProxy: appdata.settings['webdavProxyEnabled'] != false,
+              );
+  }
+
+  late final Dio _imageDio;
 
   webdav.Client? _client;
   String? _lastUrl;
@@ -417,17 +436,22 @@ class WebDavComicClient {
 
   /// Read an image file from WebDAV as bytes.
   Future<Uint8List> readImage(String path, {CancelToken? cancelToken}) async {
-    final client = getClient();
     try {
-      // Download to temp file, then read
-      final tempDir = Directory.systemTemp;
-      final tempFile = File(
-        '${tempDir.path}/webdav_temp_${DateTime.now().microsecondsSinceEpoch}',
+      final config = getConfig();
+      if (config == null) throw Exception('WebDAV not configured');
+      final response = await _imageDio.get<List<int>>(
+        buildEncodedUrl(config[0], path),
+        options: Options(
+          headers: {
+            'authorization':
+                'Basic ${base64Encode(utf8.encode('${config[1]}:${config[2]}'))}',
+          },
+        ),
+        cancelToken: cancelToken,
       );
-      await client.read2File(path, tempFile.path, cancelToken: cancelToken);
-      final data = await tempFile.readAsBytes();
-      await tempFile.deleteIgnoreError();
-      return data;
+      final data = response.data ?? (throw Exception('Empty response body'));
+      if (data.isEmpty) throw Exception('Empty image data');
+      return data is Uint8List ? data : Uint8List.fromList(data);
     } catch (e, s) {
       if (e is DioException && CancelToken.isCancel(e)) {
         rethrow;

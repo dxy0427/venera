@@ -50,8 +50,9 @@ typedef GetImageLoadingConfigFunc =
     Future<Map<String, dynamic>> Function(
       String imageKey,
       String comicId,
-      String epId,
-    )?;
+      String epId, {
+      String? requestId,
+    })?;
 typedef GetThumbnailLoadingConfigFunc =
     Map<String, dynamic> Function(String imageKey)?;
 

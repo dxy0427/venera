@@ -44,7 +44,7 @@ class _ReaderSource implements ComicSource {
 
   @override
   GetImageLoadingConfigFunc get getImageLoadingConfig =>
-      (image, cid, eid) async {
+      (image, cid, eid, {requestId}) async {
         imageLoads.add(image);
         throw 'Invalid Status Code: 404';
       };

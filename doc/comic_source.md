@@ -660,6 +660,28 @@ If `load` function is implemented, `loadNext` function will be ignored.
 
 This part is used to load comic details.
 
+#### Cancellable image address resolution (custom build 1.16.0+215)
+
+`onImageLoad` can receive a fifth argument, a request-scoped `Network` object:
+
+```javascript
+onImageLoad: async (image, comicId, epId, retryToken, network = Network) => {
+    const response = await network.get(resolveUrl(image));
+    return {url: JSON.parse(response.body).url};
+}
+```
+
+Use this object for all address-resolution requests and pass it to helper
+functions and `onLoadFailed` closures. Those requests share the image's
+cancellation token; leaving the chapter also cancels pending HTTP resolution.
+The fourth argument is left undefined by the app and remains available to
+source-specific retry code (EH uses it for `nl`). Do not store the scoped object
+globally: it expires when that image operation finishes.
+
+Existing three-argument sources still work. Their global `Network` calls do not
+automatically gain cancellation; they must adopt the scoped object. The EH
+source bundled in this branch supports it from version 1.5.5.
+
 #### Settings
 
 ```javascript
