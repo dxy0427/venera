@@ -1,5 +1,32 @@
 part of 'reader.dart';
 
+/// Reader loading feedback without a continuously running animation.
+class _ReaderLoadingIndicator extends StatelessWidget {
+  const _ReaderLoadingIndicator({this.progress});
+
+  final ImageChunkEvent? progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = progress?.expectedTotalBytes;
+    final percentage = total != null && total > 0
+        ? (progress!.cumulativeBytesLoaded * 100 / total).clamp(0, 100).floor()
+        : null;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(
+          percentage == null ? 'Loading'.tl : '${'Loading'.tl} $percentage%',
+          textAlign: TextAlign.center,
+          style: context.textTheme.bodyMedium?.copyWith(
+            color: context.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ReaderWithLoading extends StatefulWidget {
   const ReaderWithLoading({
     super.key,
@@ -23,6 +50,9 @@ class ReaderWithLoading extends StatefulWidget {
 
 class _ReaderWithLoadingState
     extends LoadingState<ReaderWithLoading, ReaderProps> {
+  @override
+  Widget buildLoading() => const _ReaderLoadingIndicator();
+
   @override
   Widget buildContent(BuildContext context, ReaderProps data) {
     return Reader(

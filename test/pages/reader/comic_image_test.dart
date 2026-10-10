@@ -135,49 +135,42 @@ void main() {
   }
 
   testWidgets(
-    'known length fills the progress circle before showing the image',
+    'known length shows download percentage until the image is decoded',
     (tester) async {
       final provider = _ControlledReaderImage('known-length');
       await showImages(tester, [provider]);
-      final indicator = find.byType(CircularProgressIndicator);
-      expect(tester.widget<CircularProgressIndicator>(indicator).value, isNull);
+      expect(find.text('Loading'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
 
-      for (final loaded in [25, 60, 100]) {
+      for (final loaded in [0, 25, 60, 100]) {
         provider.progress(loaded, 100);
         await tester.pump();
         await tester.pump();
-        expect(
-          tester.widget<CircularProgressIndicator>(indicator).value,
-          loaded / 100,
-        );
+        expect(find.text('Loading $loaded%'), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
         expect(find.byType(RawImage), findsNothing);
       }
 
       await completeImage(tester, provider);
-      expect(indicator, findsNothing);
+      expect(find.textContaining('Loading'), findsNothing);
       expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
       expect(provider.loads, 1);
     },
   );
 
-  testWidgets('unknown length keeps an indeterminate circle until decoded', (
+  testWidgets('unknown length keeps a static loading label until decoded', (
     tester,
   ) async {
     final provider = _ControlledReaderImage('unknown-length');
     await showImages(tester, [provider]);
     for (final total in <int?>[null, 0]) {
       provider.progress(25, total);
-      await tester.pump();
-      expect(
-        tester
-            .widget<CircularProgressIndicator>(
-              find.byType(CircularProgressIndicator),
-            )
-            .value,
-        isNull,
-      );
+      await tester.pumpAndSettle();
+      expect(find.text('Loading'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
     }
     await completeImage(tester, provider);
+    expect(find.text('Loading'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.byType(RawImage), findsOneWidget);
   });
@@ -233,9 +226,11 @@ void main() {
     final retry = _ControlledReaderImage('empty-then-valid');
     await showImages(tester, [retry], key: const ValueKey('retry'));
     expect(retry.loads, 1, reason: 'a new resolve must load again');
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('Loading'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
 
     await completeImage(tester, retry, 0);
+    expect(find.text('Loading'), findsNothing);
     expect(find.textContaining('Empty image data'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);

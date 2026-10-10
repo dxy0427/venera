@@ -151,7 +151,7 @@ class _ReaderImagesState extends State<_ReaderImages> {
   Widget build(BuildContext context) {
     if (reader.isLoading) {
       load();
-      return const Center(child: CircularProgressIndicator());
+      return const _ReaderLoadingIndicator();
     } else if (error != null) {
       return GestureDetector(
         onTap: () {

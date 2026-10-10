@@ -437,8 +437,8 @@ void main() {
 }
 
 Future<void> settleReader(WidgetTester tester) async {
-  // File reads and image decoding run outside the fake clock. Pump bounded
-  // frames because an image's indeterminate progress intentionally animates.
+  // File reads and image decoding run outside the fake clock. Interleave real
+  // I/O with bounded frame pumps so both loading and page animations finish.
   for (var i = 0; i < 12; i++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 20)),

@@ -243,18 +243,7 @@ class _GalleryModeState extends State<_GalleryMode>
             backgroundDecoration: BoxDecoration(
               color: context.colorScheme.surface,
             ),
-            child: Center(
-              child: SizedBox(
-                width: 20.0,
-                height: 20.0,
-                child: CircularProgressIndicator(
-                  backgroundColor: context.colorScheme.surfaceContainerHigh,
-                  value: event == null || event.expectedTotalBytes == null
-                      ? null
-                      : event.cumulativeBytesLoaded / event.expectedTotalBytes!,
-                ),
-              ),
-            ),
+            child: _ReaderLoadingIndicator(progress: event),
           );
         },
         onPageChanged: (i) {
