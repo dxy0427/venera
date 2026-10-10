@@ -1,6 +1,7 @@
 part of 'reader.dart';
 
-/// Reader loading feedback without a continuously running animation.
+/// Prime-style reader loading feedback. Unknown lengths use value 0 so the
+/// ring stays static rather than using an indeterminate rotating animation.
 class _ReaderLoadingIndicator extends StatelessWidget {
   const _ReaderLoadingIndicator({this.progress});
 
@@ -9,18 +10,16 @@ class _ReaderLoadingIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = progress?.expectedTotalBytes;
-    final percentage = total != null && total > 0
-        ? (progress!.cumulativeBytesLoaded * 100 / total).clamp(0, 100).floor()
-        : null;
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Text(
-          percentage == null ? 'Loading'.tl : '${'Loading'.tl} $percentage%',
-          textAlign: TextAlign.center,
-          style: context.textTheme.bodyMedium?.copyWith(
-            color: context.colorScheme.onSurfaceVariant,
-          ),
+      child: SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(
+          strokeWidth: 3,
+          backgroundColor: context.colorScheme.surfaceContainer,
+          value: total != null && total > 0
+              ? (progress!.cumulativeBytesLoaded / total).clamp(0.0, 1.0)
+              : 0,
         ),
       ),
     );
