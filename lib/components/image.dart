@@ -5,7 +5,6 @@ class AnimatedImage extends StatefulWidget {
   AnimatedImage({
     required ImageProvider image,
     super.key,
-    double scale = 1.0,
     this.semanticLabel,
     this.excludeFromSemantics = false,
     this.width,
@@ -23,7 +22,6 @@ class AnimatedImage extends StatefulWidget {
     this.isAntiAlias = false,
     this.part,
     this.onError,
-    Map<String, String>? headers,
     int? cacheWidth,
     int? cacheHeight,
   }) : image = ResizeImage.resizeIfNeeded(cacheWidth, cacheHeight, image),
@@ -66,8 +64,6 @@ class AnimatedImage extends StatefulWidget {
 
   final Function? onError;
 
-  static void clear() => _AnimatedImageState.clear();
-
   @override
   State<AnimatedImage> createState() => _AnimatedImageState();
 }
@@ -84,10 +80,6 @@ class _AnimatedImageState extends State<AnimatedImage>
   late DisposableBuildContext<State<AnimatedImage>> _scrollAwareContext;
   Object? _lastException;
   ImageStreamCompleterHandle? _completerHandle;
-
-  static final Map<int, Size> _cache = {};
-
-  static clear() => _cache.clear();
 
   @override
   void initState() {
@@ -167,8 +159,8 @@ class _AnimatedImageState extends State<AnimatedImage>
 
   ImageStreamListener? _imageStreamListener;
 
-  ImageStreamListener _getListener({bool recreateListener = false}) {
-    if (_imageStreamListener == null || recreateListener) {
+  ImageStreamListener _getListener() {
+    if (_imageStreamListener == null) {
       _lastException = null;
       _imageStreamListener = ImageStreamListener(
         _handleImageFrame,

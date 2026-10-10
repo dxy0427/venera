@@ -244,11 +244,9 @@ abstract class ImageDownloader {
       }
     }
 
-    // Local CBZ entries, WebDAV streams, and extracted local images.
+    // Local CBZ entries and extracted local images.
     if ((imageKey.startsWith('localcbz://') ||
             sourceKey == 'webdav' ||
-            imageKey.startsWith('webdav://') ||
-            imageKey.startsWith('stream://') ||
             imageKey.startsWith('file://')) &&
         !imageKey.startsWith('http://') &&
         !imageKey.startsWith('https://')) {

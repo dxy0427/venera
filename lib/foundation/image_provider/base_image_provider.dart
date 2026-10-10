@@ -1,5 +1,4 @@
 import 'dart:async' show Future, StreamController, scheduleMicrotask;
-import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui show Codec;
 import 'dart:ui';
@@ -119,17 +118,6 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
           // Cleanup is best-effort and must not mask the decode error.
           Log.error("Image Loading", e2);
         }
-        if (data.length < 2 * 1024) {
-          // data is too short, it's likely that the data is text, not image
-          try {
-            var text = const Utf8Codec(
-              allowMalformed: false,
-            ).decoder.convert(data);
-            throw Exception("Expected image data, but got text: $text");
-          } catch (e) {
-            // ignore
-          }
-        }
         rethrow;
       }
     } catch (e, s) {
@@ -138,7 +126,6 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
       });
       if (!_isImageCancellation(e)) {
         Log.error("Image Loading", e, s);
-        onLoadError();
       }
       rethrow;
     } finally {
@@ -168,17 +155,11 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
 
   bool get enableResize => false;
 
-  /// Called when image loading fails after all retries are exhausted.
-  /// Subclasses can override to perform cleanup (e.g. invalidate page cache).
-  void onLoadError() {}
-
   /// Called when the downloaded bytes cannot be decoded. Subclasses should
   /// invalidate the download cache so a retry fetches fresh data instead of
   /// re-reading the same corrupted bytes.
   Future<void> onDeleteCache() async {}
 }
-
-typedef FileDecoderCallback = Future<ui.Codec> Function(Uint8List);
 
 bool _isImageCancellation(Object? error) =>
     error is _ImageLoadingStopException ||

@@ -3,10 +3,8 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/log.dart';
-import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/natural_sort.dart';
 
@@ -128,14 +126,6 @@ class WebDavProvider with ChangeNotifier {
 
   String _cacheKey(String prefix, String path) =>
       '${prefix}_${_accountScope}_$path';
-
-  /// Currently downloading chapter paths (for progress display).
-  final Set<String> _downloadingChapters = {};
-  Set<String> get downloadingChapters => _downloadingChapters;
-
-  /// Download progress for each chapter (0.0 ~ 1.0).
-  final Map<String, double> _downloadProgress = {};
-  double? getDownloadProgress(String path) => _downloadProgress[path];
 
   /// Load comics list from WebDAV server.
   Future<void> loadComics({bool forceRefresh = false}) async {
@@ -313,9 +303,7 @@ class WebDavProvider with ChangeNotifier {
       }
       if (latest == null && !remotePath.endsWith('/')) {
         final parent = _parentDirectory(remotePath);
-        final target = remotePath.endsWith('/')
-            ? remotePath.substring(0, remotePath.length - 1)
-            : remotePath;
+        final target = remotePath;
         final targetName = target
             .split('/')
             .where((part) => part.isNotEmpty)
@@ -384,21 +372,6 @@ class WebDavProvider with ChangeNotifier {
     if (ref.accountId != accountId) {
       throw WebDavAccountMismatchException(accountId, ref.accountId);
     }
-  }
-
-  /// Get the cache directory for a CBZ file (offline extract fallback only).
-  Directory getCbzCacheDir(String remotePath) {
-    final pathHash = remotePath.hashCode.toRadixString(16);
-    return Directory(
-      FilePath.join(App.cachePath, 'webdav_cbz', _accountScope, pathHash),
-    );
-  }
-
-  /// Check if a CBZ is already fully extracted offline.
-  bool isCbzCached(String remotePath) {
-    final dir = getCbzCacheDir(remotePath);
-    if (!dir.existsSync()) return false;
-    return _listLocalImages(dir).isNotEmpty;
   }
 
   Future<_StreamInfo> _ensureStreamReader(String remotePath) async {
@@ -579,95 +552,6 @@ class WebDavProvider with ChangeNotifier {
         ? realPath.substring(8)
         : realPath;
     await CacheManager().delete(_cacheKey('webdav_img', realPath));
-  }
-
-  /// Download a CBZ file, extract it, return local image paths.
-  Future<List<String>> _downloadAndExtractCbz(String remotePath) async {
-    final cacheDir = getCbzCacheDir(remotePath);
-
-    // Already cached?
-    if (cacheDir.existsSync()) {
-      final images = _listLocalImages(cacheDir);
-      if (images.isNotEmpty) return images;
-      await cacheDir.delete(recursive: true);
-    }
-
-    // Download with progress tracking
-    _downloadingChapters.add(remotePath);
-    _downloadProgress[remotePath] = 0.0;
-    notifyListeners();
-
-    await cacheDir.create(recursive: true);
-    final cbzFile = File(FilePath.join(cacheDir.path, 'archive.cbz'));
-
-    try {
-      // Download with progress
-      await _client.downloadFile(
-        remotePath,
-        cbzFile.path,
-        onProgress: (received, total) {
-          if (total > 0) {
-            _downloadProgress[remotePath] = received / total;
-            notifyListeners();
-          }
-        },
-      );
-
-      _downloadProgress[remotePath] = 1.0;
-      notifyListeners();
-
-      // Extract
-      await CBZ.extractArchive(cbzFile, cacheDir);
-      await cbzFile.deleteIgnoreError();
-
-      final images = _listLocalImages(cacheDir);
-      if (images.isEmpty) throw Exception('No images found in archive');
-      return images;
-    } catch (e) {
-      await cacheDir.deleteIgnoreError(recursive: true);
-      rethrow;
-    } finally {
-      _downloadingChapters.remove(remotePath);
-      _downloadProgress.remove(remotePath);
-      notifyListeners();
-    }
-  }
-
-  /// Pre-download a chapter in the background.
-  void preDownloadChapter(String chapterPath) {
-    final lowerPath = chapterPath.toLowerCase();
-    if (lowerPath.endsWith('.cbz') || lowerPath.endsWith('.zip')) {
-      if (isCbzCached(chapterPath)) return;
-      if (_downloadingChapters.contains(chapterPath)) return;
-      _downloadAndExtractCbz(chapterPath).catchError((e) {
-        Log.error("WebDavProvider", "Pre-download failed: $e");
-        return <String>[];
-      });
-    }
-  }
-
-  List<String> _listLocalImages(Directory dir) {
-    final imageExtensions = {
-      '.jpg',
-      '.jpeg',
-      '.png',
-      '.gif',
-      '.webp',
-      '.bmp',
-      '.tiff',
-      '.tif',
-    };
-    final files = <File>[];
-    for (final entity in dir.listSync()) {
-      if (entity is File) {
-        final ext = _getExtension(entity.name).toLowerCase();
-        if (imageExtensions.contains(ext)) {
-          files.add(entity);
-        }
-      }
-    }
-    files.sort((a, b) => naturalCompare(a.name, b.name));
-    return files.map((e) => 'file://${e.path}').toList();
   }
 
   static String _getExtension(String name) {

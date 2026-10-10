@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:venera/network/app_dio.dart';
 
 class NetworkCache {
@@ -68,9 +67,6 @@ class NetworkCacheManager implements Interceptor {
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
-    if (err.requestOptions.method != "GET") {
-      return handler.next(err);
-    }
     return handler.next(err);
   }
 
@@ -158,7 +154,6 @@ class NetworkCacheManager implements Interceptor {
       'set-cookie',
       'cf-cache-status',
       'cf-request-id',
-      'cf-ray',
       'authorization',
     ];
     for (var key in shouldIgnore) {
@@ -216,9 +211,6 @@ class NetworkCacheManager implements Interceptor {
       return 0;
     }
     if (data is List<int>) {
-      return data.length;
-    }
-    if (data is Uint8List) {
       return data.length;
     }
     if (data is String) {

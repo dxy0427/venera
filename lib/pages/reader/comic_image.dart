@@ -5,7 +5,6 @@ class ComicImage extends StatefulWidget {
   ComicImage({
     required ImageProvider image,
     super.key,
-    double scale = 1.0,
     this.semanticLabel,
     this.excludeFromSemantics = false,
     this.width,
@@ -21,7 +20,6 @@ class ComicImage extends StatefulWidget {
     this.gaplessPlayback = false,
     this.filterQuality = FilterQuality.medium,
     this.isAntiAlias = false,
-    Map<String, String>? headers,
     int? cacheWidth,
     int? cacheHeight,
     this.onInit,
@@ -180,8 +178,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
 
   ImageStreamListener? _imageStreamListener;
 
-  ImageStreamListener _getListener({bool recreateListener = false}) {
-    if (_imageStreamListener == null || recreateListener) {
+  ImageStreamListener _getListener() {
+    if (_imageStreamListener == null) {
       _lastException = null;
       _imageStreamListener = ImageStreamListener(
         _handleImageFrame,

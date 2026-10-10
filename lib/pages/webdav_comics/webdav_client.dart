@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:webdav_client/webdav_client.dart' as webdav;
 import 'package:venera/foundation/appdata.dart';
@@ -541,50 +540,6 @@ class WebDavComicClient {
     return base
         .replace(pathSegments: [...base.pathSegments, ...extra])
         .toString();
-  }
-
-  Future<void> downloadFile(
-    String remotePath,
-    String localPath, {
-    void Function(int received, int total)? onProgress,
-  }) async {
-    try {
-      final dio = AppDio(
-        BaseOptions(method: 'GET', responseType: ResponseType.stream),
-      );
-
-      final config = getConfig();
-      if (config == null) throw Exception('WebDAV not configured');
-
-      final fullUrl = buildEncodedUrl(config[0], remotePath);
-
-      final req = await dio.request<ResponseBody>(
-        fullUrl,
-        options: Options(
-          headers: {
-            'authorization':
-                'Basic ${base64Encode(utf8.encode('${config[1]}:${config[2]}'))}',
-          },
-        ),
-      );
-
-      final stream = req.data?.stream ?? (throw Exception('Empty response'));
-      final totalBytes = req.data!.contentLength;
-      final file = File(localPath);
-      final sink = file.openWrite();
-      int received = 0;
-
-      await for (final chunk in stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(received, totalBytes);
-      }
-
-      await sink.close();
-    } catch (e, s) {
-      Log.error("WebDavClient", "Failed to download $remotePath: $e\n$s");
-      rethrow;
-    }
   }
 
   static String _getExtension(String name) {
