@@ -98,6 +98,7 @@ class StreamingZipReader {
     Map<String, String>? extraHeaders,
     ResponseType responseType = ResponseType.bytes,
     int maxHops = 8,
+    CancelToken? cancelToken,
   }) async {
     var url = startUrl;
     final isRangeRequest =
@@ -109,10 +110,12 @@ class StreamingZipReader {
           ? await _dio.head(
               url,
               options: Options(headers: headers, responseType: responseType),
+              cancelToken: cancelToken,
             )
           : await _dio.get(
               url,
               options: Options(headers: headers, responseType: responseType),
+              cancelToken: cancelToken,
             );
 
       if (_isRedirect(response.statusCode)) {
@@ -229,7 +232,11 @@ class StreamingZipReader {
     return bytes;
   }
 
-  Future<Uint8List> _readRange(int start, int end) async {
+  Future<Uint8List> _readRange(
+    int start,
+    int end, {
+    CancelToken? cancelToken,
+  }) async {
     // Start from resolved CDN if known; otherwise from WebDAV so redirects
     // are followed manually without leaking Auth to foreign hosts.
     final startUrl = _cdnUrl ?? webdavUrl;
@@ -242,9 +249,11 @@ class StreamingZipReader {
           'Accept-Encoding': 'identity',
         },
         responseType: ResponseType.stream,
+        cancelToken: cancelToken,
       );
       return await _readRangeResponse(response, start, end);
     } catch (e) {
+      if (e is DioException && CancelToken.isCancel(e)) rethrow;
       if (startUrl == webdavUrl) rethrow;
       // Signed CDN URLs can expire during a long reading session.
       _cdnUrl = null;
@@ -256,35 +265,41 @@ class StreamingZipReader {
           'Accept-Encoding': 'identity',
         },
         responseType: ResponseType.stream,
+        cancelToken: cancelToken,
       );
       return _readRangeResponse(response, start, end);
     }
   }
 
-  Future<int> _getFileSize() async {
+  Future<int> _getFileSize({CancelToken? cancelToken}) async {
     if (_fileSize != null) return _fileSize!;
 
     try {
-      await _request('HEAD', webdavUrl);
+      await _request('HEAD', webdavUrl, cancelToken: cancelToken);
       if (_fileSize != null) return _fileSize!;
     } catch (e) {
+      if (e is DioException && CancelToken.isCancel(e)) rethrow;
       // Some CDNs reject HEAD (e.g. 403) but allow ranged GETs; the
       // bytes=0-0 fallback below is authoritative.
       Log.info("StreamingZip", "size HEAD failed; falling back to ranged GET");
     }
 
-    await _readRange(0, 0);
+    await _readRange(0, 0, cancelToken: cancelToken);
     if (_fileSize != null) return _fileSize!;
     throw Exception('Cannot determine file size');
   }
 
-  Future<void> _parseCentralDirectory() async {
+  Future<void> _parseCentralDirectory({CancelToken? cancelToken}) async {
     if (_entries != null) return;
 
-    final fileSize = await _getFileSize();
+    final fileSize = await _getFileSize(cancelToken: cancelToken);
     final tailSize = (fileSize < 65536) ? fileSize : 65536;
     final tailStart = fileSize - tailSize;
-    final tail = await _readRange(tailStart, fileSize - 1);
+    final tail = await _readRange(
+      tailStart,
+      fileSize - 1,
+      cancelToken: cancelToken,
+    );
 
     // Find EOCD (PK\x05\x06)
     int eocdPos = -1;
@@ -309,7 +324,11 @@ class StreamingZipReader {
       throw Exception('ZIP64 not supported for streaming');
     }
 
-    final cdData = await _readRange(cdOffset, cdOffset + cdSize - 1);
+    final cdData = await _readRange(
+      cdOffset,
+      cdOffset + cdSize - 1,
+      cancelToken: cancelToken,
+    );
 
     _entries = [];
     int pos = 0;
@@ -378,18 +397,23 @@ class StreamingZipReader {
         .toList();
   }
 
-  Future<Uint8List> readEntry(String fileName) async {
-    await _parseCentralDirectory();
+  Future<Uint8List> readEntry(
+    String fileName, {
+    CancelToken? cancelToken,
+  }) async {
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
+    await _parseCentralDirectory(cancelToken: cancelToken);
     final entry = _entries!.firstWhere(
       (e) => e.fileName == fileName,
       orElse: () => throw Exception('Entry not found: $fileName'),
     );
 
-    final fileSize = await _getFileSize();
+    final fileSize = await _getFileSize(cancelToken: cancelToken);
     final headerEnd = entry.localHeaderOffset + 30 + 1024;
     final headerData = await _readRange(
       entry.localHeaderOffset,
       headerEnd >= fileSize ? fileSize - 1 : headerEnd,
+      cancelToken: cancelToken,
     );
 
     final lh = ByteData.sublistView(headerData);
@@ -409,6 +433,7 @@ class StreamingZipReader {
     final data = await _readRange(
       dataOffset,
       dataOffset + entry.compressedSize - 1,
+      cancelToken: cancelToken,
     );
 
     if (entry.compressionMethod == 0) {

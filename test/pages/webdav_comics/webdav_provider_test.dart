@@ -374,7 +374,10 @@ class _FakeStreamingZipReader extends StreamingZipReader {
   Future<List<ZipEntryInfo>> listEntries() => listEntriesResult;
 
   @override
-  Future<Uint8List> readEntry(String fileName) async {
+  Future<Uint8List> readEntry(
+    String fileName, {
+    CancelToken? cancelToken,
+  }) async {
     final result = readEntryResults[fileName];
     if (result == null) throw StateError('No fake entry for $fileName');
     return Uint8List.fromList(result);

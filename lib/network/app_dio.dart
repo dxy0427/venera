@@ -8,6 +8,7 @@ import 'package:rhttp/rhttp.dart' as rhttp;
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/cache.dart';
+import 'package:venera/network/dns_overrides.dart';
 import 'package:venera/network/proxy.dart';
 
 import '../foundation/app.dart';
@@ -185,15 +186,12 @@ class RHttpAdapter implements HttpClientAdapter {
 
   Future<rhttp.ClientSettings> settingsFor(RequestOptions options) async {
     var proxy = enableProxy ? await getProxy() : null;
-    // Honor Dio's followRedirects. StreamingZip needs false so it can
-    // capture OpenList/AList 302 Location (CDN signed URL) without sending
-    // Basic Auth to the CDN host (which returns 403).
-    final redirects = options.followRedirects
-        ? const rhttp.RedirectSettings.limited(5)
-        : const rhttp.RedirectSettings.none();
     final overrides = getDnsOverrides();
     final noSniDomains = getNoSniDomains();
-    final host = options.uri.host;
+    final host = options.uri.host.toLowerCase().replaceFirst(
+      RegExp(r'\.$'),
+      '',
+    );
     // Domain fronting: connect to the override IP without SNI. The override
     // server's certificate does not match the original hostname (e.g. the
     // site's own servers present their main certificate for any host), so
@@ -204,7 +202,9 @@ class RHttpAdapter implements HttpClientAdapter {
       proxySettings: proxy == null
           ? const rhttp.ProxySettings.noProxy()
           : rhttp.ProxySettings.proxy(proxy),
-      redirectSettings: redirects,
+      // Redirects are handled one hop at a time in fetch, since TLS settings
+      // are client-wide in rhttp and must be recalculated for the next host.
+      redirectSettings: const rhttp.RedirectSettings.none(),
       timeoutSettings: const rhttp.TimeoutSettings(
         connectTimeout: Duration(seconds: 15),
         keepAliveTimeout: Duration(seconds: 60),
@@ -214,6 +214,7 @@ class RHttpAdapter implements HttpClientAdapter {
       dnsSettings: rhttp.DnsSettings.static(
         overrides: {
           for (var entry in overrides.entries) entry.key: [entry.value],
+          if (overrides.containsKey(host)) options.uri.host: [overrides[host]!],
         },
       ),
       tlsSettings: rhttp.TlsSettings(
@@ -235,7 +236,13 @@ class RHttpAdapter implements HttpClientAdapter {
     if (config is Map) {
       for (var entry in config.entries) {
         if (entry.key is String && entry.value is String) {
-          result[entry.key] = entry.value;
+          try {
+            result[normalizeDnsHost(entry.key)] = normalizeDnsAddress(
+              entry.value,
+            );
+          } on FormatException {
+            // Old/synced invalid entries must not break unrelated requests.
+          }
         }
       }
     }
@@ -250,7 +257,11 @@ class RHttpAdapter implements HttpClientAdapter {
     if (config is List) {
       for (var domain in config) {
         if (domain is String) {
-          result.add(domain);
+          try {
+            result.add(normalizeDnsHost(domain));
+          } on FormatException {
+            // The editor reports invalid new entries before saving them.
+          }
         }
       }
       return result;
@@ -268,6 +279,93 @@ class RHttpAdapter implements HttpClientAdapter {
 
   @override
   Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    var current = options;
+    var body = requestStream;
+    var cancelled = false;
+    cancelFuture?.then((_) => cancelled = true);
+    final redirects = <RedirectRecord>[];
+    while (true) {
+      if (cancelled) {
+        throw DioException.requestCancelled(
+          requestOptions: options,
+          reason: 'Request cancelled',
+        );
+      }
+      final response = await fetchOnce(current, body, cancelFuture);
+      final location = response.headers['location']?.firstOrNull;
+      final code = response.statusCode;
+      final isRedirect = {301, 302, 303, 307, 308}.contains(code);
+      // A streaming upload cannot be replayed for a 307/308. Like reqwest,
+      // expose that response to the caller instead of resending an empty body.
+      if (!options.followRedirects ||
+          !isRedirect ||
+          location == null ||
+          ((code == 307 || code == 308) && body != null)) {
+        response.redirects = redirects;
+        return response;
+      }
+      await response.stream.listen(null, onError: (Object _) {}).cancel();
+      if (redirects.length >= options.maxRedirects) {
+        throw DioException(
+          requestOptions: options,
+          error: const RedirectException('Too many redirects', []),
+        );
+      }
+      final next = current.uri.resolve(location);
+      if (!{'http', 'https'}.contains(next.scheme) || next.host.isEmpty) {
+        throw DioException(
+          requestOptions: options,
+          error: const FormatException('Invalid redirect URL'),
+        );
+      }
+      final headers = Map<String, dynamic>.from(current.headers);
+      var method = current.method;
+      if (code == 301 || code == 302 || code == 303) {
+        body = null;
+        if (method != 'GET' && method != 'HEAD') method = 'GET';
+        headers.removeWhere(
+          (key, _) => {
+            'content-length',
+            'content-type',
+            'transfer-encoding',
+          }.contains(key.toLowerCase()),
+        );
+      }
+      final sameOrigin =
+          next.scheme == current.uri.scheme &&
+          next.host == current.uri.host &&
+          next.port == current.uri.port;
+      if (!sameOrigin) {
+        headers.removeWhere(
+          (key, _) => {
+            'authorization',
+            'proxy-authorization',
+            'cookie',
+            'host',
+          }.contains(key.toLowerCase()),
+        );
+      }
+      if (current.uri.scheme == 'https' && next.scheme == 'http') {
+        headers.removeWhere((key, _) => key.toLowerCase() == 'referer');
+      }
+      redirects.add(RedirectRecord(code, method, next));
+      current = current.copyWith(
+        path: next.toString(),
+        baseUrl: '',
+        queryParameters: {},
+        method: method,
+        headers: headers,
+      );
+    }
+  }
+
+  /// Perform one HTTP exchange. Keeping the transport separate also permits
+  /// exercising the redirect policy against a local test server.
+  Future<ResponseBody> fetchOnce(
     RequestOptions options,
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
@@ -308,8 +406,23 @@ class RHttpAdapter implements HttpClientAdapter {
       headers[key]!.add(entry.$2);
     }
     final code = res.statusCode;
+    late StreamSubscription<Uint8List> subscription;
+    final controller = StreamController<Uint8List>();
+    controller.onListen = () {
+      subscription = res.body.listen(
+        controller.add,
+        onError: controller.addError,
+        onDone: controller.close,
+      );
+    };
+    controller.onPause = () => subscription.pause();
+    controller.onResume = () => subscription.resume();
+    controller.onCancel = () async {
+      unawaited(rhttpCancelToken.cancel());
+      await subscription.cancel();
+    };
     return ResponseBody(
-      res.body,
+      controller.stream,
       code,
       statusMessage: _getStatusMessage(code),
       isRedirect:
@@ -370,7 +483,8 @@ HttpClient createDartIoHttpClient(String? proxy) {
       return ConnectionTask.fromSocket(task.socket, task.cancel);
     }
     var port = uri.port;
-    var override = overrides[uri.host];
+    final host = uri.host.toLowerCase().replaceFirst(RegExp(r'\.$'), '');
+    var override = overrides[host];
     if (uri.scheme != "https") {
       var task = await Socket.startConnect(override ?? uri.host, port);
       return ConnectionTask.fromSocket(task.socket, task.cancel);
@@ -388,7 +502,7 @@ HttpClient createDartIoHttpClient(String? proxy) {
     }
     var task = await Socket.startConnect(override, port);
     Future<SecureSocket> socket;
-    if (noSniDomains.contains(uri.host)) {
+    if (noSniDomains.contains(host)) {
       // Bypass SNI: the domain name is not sent in the TLS handshake.
       // dart:io cannot omit the SNI extension, so the override IP is sent
       // instead (rhttp sends no SNI at all). The certificate cannot match

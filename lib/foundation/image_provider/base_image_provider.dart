@@ -5,6 +5,7 @@ import 'dart:ui' as ui show Codec;
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:venera/foundation/log.dart';
 
 abstract class BaseImageProvider<T extends BaseImageProvider<T>>
@@ -37,7 +38,7 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
   @override
   ImageStreamCompleter loadImage(T key, ImageDecoderCallback decode) {
     final chunkEvents = StreamController<ImageChunkEvent>();
-    return MultiFrameImageStreamCompleter(
+    return _CancellableImageStreamCompleter(
       codec: _loadBufferAsync(key, chunkEvents, decode),
       chunkEvents: chunkEvents.stream,
       scale: 1.0,
@@ -77,6 +78,7 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
         } on _ImageLoadingStopException {
           rethrow;
         } catch (e) {
+          if (e is DioException && CancelToken.isCancel(e)) rethrow;
           if (e.toString().contains("Invalid Status Code: 404")) {
             rethrow;
           }
@@ -130,14 +132,14 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
         }
         rethrow;
       }
-    } on _ImageLoadingStopException {
-      rethrow;
     } catch (e, s) {
       scheduleMicrotask(() {
         PaintingBinding.instance.imageCache.evict(key);
       });
-      Log.error("Image Loading", e, s);
-      onLoadError();
+      if (!_isImageCancellation(e)) {
+        Log.error("Image Loading", e, s);
+        onLoadError();
+      }
       rethrow;
     } finally {
       chunkEvents.close();
@@ -177,6 +179,45 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
 }
 
 typedef FileDecoderCallback = Future<ui.Codec> Function(Uint8List);
+
+bool _isImageCancellation(Object? error) =>
+    error is _ImageLoadingStopException ||
+    (error is DioException && CancelToken.isCancel(error));
+
+/// Cancelling an obsolete page is not a codec failure. Flutter otherwise
+/// reports the expected cancellation globally after the last UI listener has
+/// gone away. Real load/decode errors still use its normal error reporting.
+class _CancellableImageStreamCompleter extends MultiFrameImageStreamCompleter {
+  _CancellableImageStreamCompleter({
+    required super.codec,
+    required super.scale,
+    super.chunkEvents,
+    super.informationCollector,
+  });
+
+  @override
+  void reportError({
+    DiagnosticsNode? context,
+    required Object exception,
+    StackTrace? stack,
+    InformationCollector? informationCollector,
+    bool silent = false,
+  }) {
+    if (_isImageCancellation(exception)) {
+      if (!hasListeners) return;
+      // Let pending precache consumers finish, without reporting a user
+      // cancellation as a global Flutter error when no error listener remains.
+      addEphemeralErrorListener((_, _) {});
+    }
+    super.reportError(
+      context: context,
+      exception: exception,
+      stack: stack,
+      informationCollector: informationCollector,
+      silent: silent,
+    );
+  }
+}
 
 class _ImageLoadingStopException implements Exception {
   const _ImageLoadingStopException();

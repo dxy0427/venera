@@ -242,10 +242,16 @@ class __DNSOverridesState extends State<_DNSOverrides> {
     var noSniDomains = RHttpAdapter.getNoSniDomains();
     for (var entry in (appdata.settings['dnsOverrides'] as Map).entries) {
       if (entry.key is String && entry.value is String) {
+        var host = entry.key as String;
+        try {
+          host = normalizeDnsHost(host);
+        } on FormatException {
+          // Keep invalid legacy text visible so it can be corrected.
+        }
         overrides.add((
           TextEditingController(text: entry.key),
           TextEditingController(text: entry.value),
-          noSniDomains.contains(entry.key),
+          noSniDomains.contains(host),
         ));
       }
     }
@@ -261,23 +267,23 @@ class __DNSOverridesState extends State<_DNSOverrides> {
     super.dispose();
   }
 
-  Future<void> _save() async {
-    var map = <String, String>{};
-    var noSniDomains = <String>[];
-    for (var entry in overrides) {
-      if (entry.$1.text.isNotEmpty && entry.$2.text.isNotEmpty) {
-        map[entry.$1.text] = entry.$2.text;
-        if (entry.$3) {
-          noSniDomains.add(entry.$1.text);
-        }
-      }
+  Future<bool> _save() async {
+    final ({Map<String, String> addresses, List<String> noSni}) config;
+    try {
+      config = parseDnsOverrides(
+        overrides.map((entry) => (entry.$1.text, entry.$2.text, entry.$3)),
+      );
+    } on FormatException catch (e) {
+      context.showMessage(message: e.message.tl);
+      return false;
     }
-    appdata.settings['dnsOverrides'] = map;
-    appdata.settings['dnsOverridesNoSni'] = noSniDomains;
+    appdata.settings['dnsOverrides'] = config.addresses;
+    appdata.settings['dnsOverridesNoSni'] = config.noSni;
     // The legacy global switch no longer applies once per-domain flags exist.
     appdata.settings['sni'] = true;
     await appdata.saveData();
     JsEngine().resetDio();
+    return true;
   }
 
   @override
@@ -287,8 +293,8 @@ class __DNSOverridesState extends State<_DNSOverrides> {
       tailing: [
         TextButton.icon(
           onPressed: () async {
-            await _save();
-            if (context.mounted) {
+            final saved = await _save();
+            if (saved && context.mounted) {
               App.rootContext.pop();
             }
           },

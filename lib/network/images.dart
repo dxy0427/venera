@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_qjs/flutter_qjs.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
@@ -13,6 +14,9 @@ import 'package:venera/utils/local_cbz.dart';
 import 'app_dio.dart';
 
 abstract class ImageDownloader {
+  @visibleForTesting
+  static Dio Function(BaseOptions options)? httpClientFactory;
+
   static Stream<ImageDownloadProgress> loadThumbnail(
     String url,
     String? sourceKey, [
@@ -131,10 +135,16 @@ abstract class ImageDownloader {
 
   /// Cancel all loading images.
   static void cancelAllLoadingImages() {
-    for (var wrapper in _loadingImages.values) {
+    for (var wrapper in _loadingImages.values.toList()) {
       wrapper.cancel();
     }
     _loadingImages.clear();
+  }
+
+  static void cancelComicImages(String? sourceKey, String cid, String eid) {
+    for (final wrapper in _loadingImages.values.toList()) {
+      if (wrapper.group == (sourceKey, cid, eid)) wrapper.cancel();
+    }
   }
 
   /// Load a comic image from the network or cache.
@@ -149,11 +159,17 @@ abstract class ImageDownloader {
     if (_loadingImages.containsKey(cacheKey)) {
       return _loadingImages[cacheKey]!.stream;
     }
+    final cancelToken = CancelToken();
     final stream = _StreamWrapper<ImageDownloadProgress>(
-      _loadComicImage(imageKey, sourceKey, cid, eid),
+      _loadComicImage(imageKey, sourceKey, cid, eid, cancelToken: cancelToken),
       (wrapper) {
-        _loadingImages.remove(cacheKey);
+        // An old cancelled request can finish after a replacement has started.
+        if (identical(_loadingImages[cacheKey], wrapper)) {
+          _loadingImages.remove(cacheKey);
+        }
       },
+      cancelToken,
+      (sourceKey, cid, eid),
     );
     _loadingImages[cacheKey] = stream;
     return stream.stream;
@@ -193,8 +209,25 @@ abstract class ImageDownloader {
     String eid, {
     CancelToken? cancelToken,
   }) async* {
+    _checkCancelled(cancelToken);
+    // WebDAV owns its disk cache and invalidation keys; don't duplicate pages.
+    if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
+      final bytes = await loadSpecialImageBytes(
+        imageKey,
+        cancelToken: cancelToken,
+      );
+      _checkCancelled(cancelToken);
+      if (bytes.isEmpty) throw 'Error: Empty image data.';
+      yield ImageDownloadProgress(
+        currentBytes: bytes.length,
+        totalBytes: bytes.length,
+        imageBytes: bytes,
+      );
+      return;
+    }
     final cacheKey = _cacheKey(imageKey, sourceKey, '$cid@$eid');
     final cache = await CacheManager().findCache(cacheKey);
+    _checkCancelled(cancelToken);
 
     if (cache != null) {
       var data = await cache.readAsBytes();
@@ -224,6 +257,7 @@ abstract class ImageDownloader {
           imageKey,
           cancelToken: cancelToken,
         );
+        _checkCancelled(cancelToken);
         if (bytes.isEmpty) {
           throw "Error: Empty image data.";
         }
@@ -235,6 +269,7 @@ abstract class ImageDownloader {
         );
         return;
       } catch (e) {
+        _checkCancelled(cancelToken);
         throw "Special image load failed: $e";
       }
     }
@@ -267,7 +302,8 @@ abstract class ImageDownloader {
           };
         }
 
-        var dio = AppDio(
+        _checkCancelled(cancelToken);
+        var dio = (httpClientFactory ?? AppDio.new)(
           BaseOptions(
             headers: configs['headers'],
             method: configs['method'] ?? 'GET',
@@ -278,6 +314,7 @@ abstract class ImageDownloader {
         var req = await dio.request<ResponseBody>(
           configs['url'] ?? imageKey,
           data: configs['data'],
+          cancelToken: cancelToken,
         );
         var stream = req.data?.stream ?? (throw "Error: Empty response body.");
         int? expectedBytes = req.data!.contentLength;
@@ -286,6 +323,7 @@ abstract class ImageDownloader {
         }
         var buffer = <int>[];
         await for (var data in stream) {
+          _checkCancelled(cancelToken);
           buffer.addAll(data);
           yield ImageDownloadProgress(
             currentBytes: buffer.length,
@@ -327,6 +365,7 @@ abstract class ImageDownloader {
         if (data.isEmpty) {
           throw "Error: Empty image data.";
         }
+        _checkCancelled(cancelToken);
         await CacheManager().writeCache(cacheKey, data);
         yield ImageDownloadProgress(
           currentBytes: data.length,
@@ -335,6 +374,8 @@ abstract class ImageDownloader {
         );
         return;
       } catch (e) {
+        _checkCancelled(cancelToken);
+        if (e is DioException && CancelToken.isCancel(e)) rethrow;
         if (retryLimit < 0 || onLoadFailed == null) {
           rethrow;
         }
@@ -355,18 +396,25 @@ abstract class ImageDownloader {
   }
 }
 
+void _checkCancelled(CancelToken? token) {
+  if (token?.isCancelled == true) throw token!.cancelError!;
+}
+
 /// A wrapper class for a stream that
 /// allows multiple listeners to listen to the same stream.
 class _StreamWrapper<T> {
   final Stream<T> _stream;
 
-  final List<StreamController> controllers = [];
+  final List<StreamController<T>> controllers = [];
+
+  final CancelToken cancelToken;
+  final (String?, String, String) group;
 
   final void Function(_StreamWrapper<T> wrapper) onClosed;
 
   bool isClosed = false;
 
-  _StreamWrapper(this._stream, this.onClosed) {
+  _StreamWrapper(this._stream, this.onClosed, this.cancelToken, this.group) {
     _listen();
   }
 
@@ -408,16 +456,21 @@ class _StreamWrapper<T> {
     controllers.add(controller);
     controller.onCancel = () {
       controllers.remove(controller);
+      if (controllers.isEmpty && !isClosed) cancel();
     };
     return controller.stream;
   }
 
   void cancel() {
+    if (isClosed) return;
+    isClosed = true;
+    cancelToken.cancel('Reader image request cancelled');
     for (var controller in controllers) {
+      controller.addError(cancelToken.cancelError!);
       controller.close();
     }
     controllers.clear();
-    isClosed = true;
+    onClosed(this);
   }
 }
 

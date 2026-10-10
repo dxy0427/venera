@@ -23,7 +23,9 @@ class _ContinuousModeState extends State<_ContinuousMode>
   var fingers = 0;
   bool disableScroll = false;
 
-  late List<bool> cached;
+  final cached = <int>{};
+  final _preloading = <int>{};
+  final _retryAfter = <int, Timer>{};
 
   int get preCacheCount => appdata.settings["preloadImageCount"];
 
@@ -55,7 +57,6 @@ class _ContinuousModeState extends State<_ContinuousMode>
     reader = context.reader;
     reader._imageViewController = this;
     itemPositionsListener.itemPositions.addListener(onPositionChanged);
-    cached = List.filled(reader.maxPage + 2, false);
     Future.delayed(
       const Duration(milliseconds: 100),
       () => cacheImages(reader.page),
@@ -65,6 +66,10 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   @override
   void dispose() {
+    for (final timer in _retryAfter.values) {
+      timer.cancel();
+    }
+    _retryAfter.clear();
     itemPositionsListener.itemPositions.removeListener(onPositionChanged);
     if (identical(reader._imageViewController, this)) {
       reader._imageViewController = null;
@@ -144,20 +149,34 @@ class _ContinuousModeState extends State<_ContinuousMode>
   }
 
   void cacheImages(int current) {
+    if (!mounted || reader.images == null) return;
     final isLocalCbz =
         reader.images!.isNotEmpty &&
         reader.images!.first.startsWith('localcbz://');
     // Decode large local archive pages ahead without overwhelming the device.
     final cacheCount = isLocalCbz ? 1 : preCacheCount;
     for (int i = current + 1; i <= current + cacheCount; i++) {
-      if (i <= reader.maxPage && !cached[i]) {
-        if (isLocalCbz) {
-          _precacheImage(i, context);
-        } else {
-          _preDownloadImage(i, context);
-        }
-        cached[i] = true;
+      if (i > reader.maxPage || cached.contains(i) || _preloading.contains(i)) {
+        continue;
       }
+      if (_retryAfter.containsKey(i)) continue;
+      _preloading.add(i);
+      final page = i;
+      final loading = isLocalCbz
+          ? _precacheImage(page, context)
+          : _preDownloadImage(page, context);
+      loading.then((success) {
+        if (!mounted) return;
+        _preloading.remove(page);
+        if (success) {
+          cached.add(page);
+          _retryAfter.remove(page)?.cancel();
+        } else {
+          _retryAfter[page] = Timer(const Duration(seconds: 5), () {
+            _retryAfter.remove(page);
+          });
+        }
+      });
     }
   }
 
@@ -613,7 +632,12 @@ ImageProvider _createImageProviderFromKey(
   if (imageKey.startsWith('webdav://') ||
       imageKey.startsWith('stream://') ||
       (reader.type == ComicType.webdav && imageKey.startsWith('file://'))) {
-    return WebDavReaderImageProvider(imageKey, page: page);
+    return WebDavReaderImageProvider(
+      imageKey,
+      page: page,
+      cid: reader.cid,
+      eid: reader.eid,
+    );
   }
   return ReaderImageProvider(
     imageKey,
@@ -634,32 +658,42 @@ ImageProvider _createImageProvider(int page, BuildContext context) {
 /// [_precacheImage] is used to precache the image for the given page.
 /// The image is cached using the flutter's [precacheImage] method.
 /// The image will be downloaded and decoded into memory.
-void _precacheImage(int page, BuildContext context) {
+Future<bool> _precacheImage(int page, BuildContext context) async {
   if (page <= 0 || page > context.reader.images!.length) {
-    return;
+    return false;
   }
-  precacheImage(_createImageProvider(page, context), context);
+  var succeeded = true;
+  await precacheImage(
+    _createImageProvider(page, context),
+    context,
+    onError: (Object error, StackTrace? stack) => succeeded = false,
+  );
+  return succeeded;
 }
 
 /// [_preDownloadImage] is used to download the image for the given page.
 /// The image is downloaded using the [CacheManager] and saved to the local storage.
-void _preDownloadImage(int page, BuildContext context) {
+Future<bool> _preDownloadImage(int page, BuildContext context) async {
   if (page <= 0 || page > context.reader.images!.length) {
-    return;
+    return false;
   }
   var reader = context.reader;
   var imageKey = reader.images![page - 1];
   if (imageKey.startsWith("file://") || imageKey.startsWith('localcbz://')) {
-    return;
-  }
-  // WebDAV images are cached by WebDavProvider.loadImage.
-  if (imageKey.startsWith('webdav://') || imageKey.startsWith('stream://')) {
-    final ref = WebDavResourceRef.parse(imageKey);
-    WebDavProvider.forAccount(ref.accountId).loadImage(imageKey);
-    return;
+    return true;
   }
   var cid = reader.cid;
   var eid = reader.eid;
-  var sourceKey = reader.type.comicSource?.key;
-  ImageDownloader.loadComicImage(imageKey, sourceKey, cid, eid);
+  var sourceKey = reader.type.sourceKey;
+  try {
+    final result = await ImageDownloader.loadComicImage(
+      imageKey,
+      sourceKey,
+      cid,
+      eid,
+    ).last;
+    return result.imageBytes?.isNotEmpty == true;
+  } catch (_) {
+    return false;
+  }
 }

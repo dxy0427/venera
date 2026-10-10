@@ -13,6 +13,7 @@ class _ReaderImagesState extends State<_ReaderImages> {
   bool inProgress = false;
 
   late _ReaderState reader;
+  late final (String?, String, String) requestGroup;
 
   void _savePagesCache(String key, List<String> images) async {
     try {
@@ -26,6 +27,7 @@ class _ReaderImagesState extends State<_ReaderImages> {
   @override
   void initState() {
     reader = context.reader;
+    requestGroup = (reader.type.sourceKey, reader.cid, reader.eid);
     reader.isLoading = true;
     super.initState();
   }
@@ -33,7 +35,11 @@ class _ReaderImagesState extends State<_ReaderImages> {
   @override
   void dispose() {
     super.dispose();
-    ImageDownloader.cancelAllLoadingImages();
+    ImageDownloader.cancelComicImages(
+      requestGroup.$1,
+      requestGroup.$2,
+      requestGroup.$3,
+    );
   }
 
   /// Handle jumping to last page when _jumpToLastPageOnLoad is true

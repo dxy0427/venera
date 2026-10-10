@@ -4,6 +4,7 @@ import 'dart:io' show File;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:venera/foundation/image_provider/base_image_provider.dart';
+import 'package:venera/network/images.dart';
 
 import 'webdav_image_provider.dart' as image_provider;
 import 'webdav_provider.dart';
@@ -54,8 +55,15 @@ class WebDavReaderImageProvider
     extends BaseImageProvider<image_provider.WebDavReaderImageProvider> {
   final String path;
   final int page;
+  final String cid;
+  final String eid;
 
-  const WebDavReaderImageProvider(this.path, {required this.page});
+  const WebDavReaderImageProvider(
+    this.path, {
+    required this.page,
+    this.cid = '',
+    this.eid = '',
+  });
 
   String get accountId => WebDavResourceRef.parse(path).accountId;
 
@@ -72,7 +80,16 @@ class WebDavReaderImageProvider
     if (path.startsWith('file://')) {
       return File(path.substring(7)).readAsBytes();
     }
-    return WebDavProvider.forAccount(accountId).loadImage(path);
+    await for (final event in ImageDownloader.loadComicImage(
+      path,
+      'webdav',
+      cid,
+      eid,
+    )) {
+      checkStop();
+      if (event.imageBytes != null) return event.imageBytes!;
+    }
+    throw 'Error: Empty response body.';
   }
 
   @override

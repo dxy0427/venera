@@ -60,6 +60,7 @@ class _ReaderCache implements CacheManager {
   final File image;
   final deletedKeys = <String>[];
   final chapterFiles = <String, File>{};
+  final imageLookups = <String, int>{};
   bool failMiddle = true;
 
   /// When set, the next [findCache] for this key returns an empty file once,
@@ -69,6 +70,7 @@ class _ReaderCache implements CacheManager {
   @override
   Future<File?> findCache(String key) async {
     if (key.startsWith('loadComicPages@')) return chapterFiles[key];
+    imageLookups.update(key, (count) => count + 1, ifAbsent: () => 1);
     if (key == emptyOnceKey) {
       emptyOnceKey = null;
       return File('${directory.path}/poisoned.png')..writeAsBytesSync(const []);
@@ -380,6 +382,26 @@ void main() {
       await tapPage(tester, 3);
       await settleReader(tester);
       expect(tester.widget<CustomSlider>(find.byType(CustomSlider)).value, 3);
+      expect(source.chapterLoads, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 2));
+    },
+  );
+
+  testWidgets(
+    'failed predownloads are retried after cooldown without reloading the chapter',
+    (tester) async {
+      appdata.settings['preloadImageCount'] = 10;
+      await pumpReader(tester);
+      final imageKey = '5@${source.key}@comic@0';
+      expect(cache.imageLookups[imageKey], 1);
+      expect(source.imageLoads, contains('5'));
+      cache.failMiddle = false;
+      await tester.pump(const Duration(seconds: 6));
+      await openToolbar(tester);
+      await tapPage(tester, 2);
+      await settleReader(tester);
+      expect(cache.imageLookups[imageKey], greaterThan(1));
       expect(source.chapterLoads, 1);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 2));

@@ -514,7 +514,10 @@ class WebDavProvider with ChangeNotifier {
   /// [streamPath] formats:
   /// - `stream://remotePath::entryFileName`
   /// - `stream://remotePath` (first image, used as cover)
-  Future<Uint8List> loadStreamImage(String streamPath) async {
+  Future<Uint8List> loadStreamImage(
+    String streamPath, {
+    CancelToken? cancelToken,
+  }) async {
     _requireAccount();
     final ref = WebDavResourceRef.parse(streamPath);
     if (ref.accountId != accountId || !ref.isStream) {
@@ -522,6 +525,7 @@ class WebDavProvider with ChangeNotifier {
     }
     final remotePath = ref.remotePath;
     final info = await _ensureStreamReader(remotePath);
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
     final entryName = ref.entryName ?? info.entries.first.fileName;
 
     // Include the declared entry name in the key (empty for entry-less cover
@@ -541,10 +545,14 @@ class WebDavProvider with ChangeNotifier {
       }
     }
 
-    final data = await info.reader.readEntry(entryName);
+    final data = await info.reader.readEntry(
+      entryName,
+      cancelToken: cancelToken,
+    );
     if (data.isEmpty) {
       throw "Error: Empty image data.";
     }
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
     await CacheManager().writeCache(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
     return data;
   }
@@ -670,6 +678,7 @@ class WebDavProvider with ChangeNotifier {
 
   /// Load an image from WebDAV or streaming CBZ with caching.
   Future<Uint8List> loadImage(String path, {CancelToken? cancelToken}) async {
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
     _requireAccount();
     // Local extracted images (offline fallback)
     if (path.startsWith('file://')) {
@@ -681,7 +690,7 @@ class WebDavProvider with ChangeNotifier {
       if (ref.accountId != accountId) {
         throw WebDavAccountMismatchException(accountId, ref.accountId);
       }
-      if (ref.isStream) return loadStreamImage(path);
+      if (ref.isStream) return loadStreamImage(path, cancelToken: cancelToken);
       if (ref.kind != WebDavResourceKind.image) {
         throw Exception('Invalid WebDAV image reference');
       }
@@ -690,7 +699,7 @@ class WebDavProvider with ChangeNotifier {
       throw Exception('Unbound WebDAV image reference');
     }
     if (path.startsWith('stream://')) {
-      return loadStreamImage(path);
+      return loadStreamImage(path, cancelToken: cancelToken);
     }
 
     final realPath = path.startsWith('webdav://') ? path.substring(8) : path;
@@ -706,6 +715,7 @@ class WebDavProvider with ChangeNotifier {
       }
     }
     final data = await _client.readImage(realPath, cancelToken: cancelToken);
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
     if (data.isEmpty) {
       throw "Error: Empty image data.";
     }
