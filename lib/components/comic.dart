@@ -39,55 +39,6 @@ ImageProvider? _findImageProvider(Comic comic) {
   return image;
 }
 
-class _TapScaleBuilder extends StatefulWidget {
-  const _TapScaleBuilder({
-    required this.child,
-    this.onTap,
-    this.onLongPress,
-    this.onSecondaryTapDown,
-    this.borderRadius,
-  });
-
-  final Widget child;
-  final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
-  final void Function(TapDownDetails)? onSecondaryTapDown;
-  final BorderRadius? borderRadius;
-
-  @override
-  State<_TapScaleBuilder> createState() => _TapScaleBuilderState();
-}
-
-class _TapScaleBuilderState extends State<_TapScaleBuilder> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTapCancel: () => setState(() => _pressed = false),
-      onLongPressStart: widget.onLongPress != null
-          ? (_) => setState(() => _pressed = true)
-          : null,
-      onLongPressEnd: widget.onLongPress != null
-          ? (_) => setState(() => _pressed = false)
-          : null,
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 100),
-        child: InkWell(
-          borderRadius: widget.borderRadius,
-          onTap: widget.onTap,
-          onLongPress: widget.onLongPress,
-          onSecondaryTapDown: widget.onSecondaryTapDown,
-          child: widget.child,
-        ),
-      ),
-    );
-  }
-}
-
 class ComicTile extends StatelessWidget {
   const ComicTile({
     super.key,
@@ -130,7 +81,7 @@ class ComicTile extends StatelessWidget {
     );
   }
 
-  void _onLongPressed(context) {
+  void _onLongPressed(BuildContext context) {
     if (onLongPressed != null) {
       onLongPressed!();
       return;
@@ -327,7 +278,7 @@ class ComicTile extends StatelessWidget {
           image = Hero(tag: "cover$heroID", child: image);
         }
 
-        return _TapScaleBuilder(
+        return InkWell(
           borderRadius: BorderRadius.circular(AppRadius.lg),
           onTap: _onTap,
           onLongPress: enableLongPressed ? () => _onLongPressed(context) : null,
@@ -387,7 +338,7 @@ class ComicTile extends StatelessWidget {
           image = Hero(tag: "cover$heroID", child: image);
         }
 
-        return _TapScaleBuilder(
+        return InkWell(
           borderRadius: BorderRadius.circular(AppRadius.md),
           onTap: _onTap,
           onLongPress: enableLongPressed ? () => _onLongPressed(context) : null,
@@ -624,12 +575,11 @@ class _ComicDescription extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (tags != null) {
-      tags!.removeWhere((element) => element.removeAllBlank == "");
-      for (var s in tags!) {
-        s = s.replaceAll("\n", " ");
-      }
-    }
+    // Never mutate the caller's tag list: it may be const or shared.
+    final displayTags = tags
+        ?.where((element) => element.removeAllBlank != "")
+        .map((e) => e.replaceAll("\n", " "))
+        .toList();
     var enableTranslate =
         App.locale.languageCode == 'zh' && this.enableTranslate;
     return Column(
@@ -653,7 +603,7 @@ class _ComicDescription extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         const SizedBox(height: 4),
-        if (tags != null && tags!.isNotEmpty)
+        if (displayTags != null && displayTags.isNotEmpty)
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -680,7 +630,7 @@ class _ComicDescription extends StatelessWidget {
                     spacing: 4,
                     runSpacing: 3,
                     children: [
-                      for (var s in tags!)
+                      for (var s in displayTags)
                         Container(
                           height: tagHeight,
                           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -729,7 +679,9 @@ class _ComicDescription extends StatelessWidget {
                   Text(
                     description,
                     style: context.textTheme.bodySmall,
-                    maxLines: (tags == null || tags!.isEmpty) ? 3 : 2,
+                    maxLines: (displayTags == null || displayTags.isEmpty)
+                        ? 3
+                        : 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
