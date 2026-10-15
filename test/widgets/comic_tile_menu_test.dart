@@ -65,25 +65,34 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   }
 
-  Future<void> showTile(WidgetTester tester, {String display = 'brief'}) async {
-    appdata.settings['comicDisplayMode'] = display;
-    final comic = Comic(
+  Comic buildComic({List<String> tags = const []}) {
+    return Comic(
       'Long press details test',
       'file://${coverFile.path}',
       'comic-id',
       'Author',
-      const [],
+      tags,
       'Description',
       'source-key',
       12,
       'en',
     );
+  }
+
+  Future<void> showTile(
+    WidgetTester tester, {
+    String display = 'brief',
+    List<String> tags = const [],
+  }) async {
+    appdata.settings['comicDisplayMode'] = display;
     await tester.pumpWidget(
       MaterialApp(
         navigatorKey: App.rootNavigatorKey,
         onGenerateRoute: (_) => MaterialPageRoute(
           builder: (_) => Scaffold(
-            body: Center(child: ComicTile(comic: comic)),
+            body: Center(
+              child: ComicTile(comic: buildComic(tags: tags)),
+            ),
           ),
         ),
       ),
@@ -164,6 +173,63 @@ void main() {
     await tester.tap(find.text('Remove from Read Later'));
     await tester.pumpAndSettle();
     expect(ReadLaterManager().exists('comic-id', type), isFalse);
+    await settle(tester);
+  });
+
+  testWidgets(
+    'detailed tile renders the metadata and never mutates the tag list',
+    (tester) async {
+      // Real feeds hand over shared growable lists (the other tests cover
+      // read-only const lists): the widget must neither mutate them nor
+      // turn blank entries into visible chips.
+      final tags = <String>['Tag A', '  ', 'Tag B\nnext'];
+      await showTile(tester, display: 'detailed', tags: tags);
+      expect(find.text('Author'), findsOneWidget);
+      expect(find.text('Description'), findsOneWidget);
+      expect(find.text('Tag A'), findsOneWidget);
+      expect(find.text('Tag B next'), findsOneWidget);
+      expect(tags, [
+        'Tag A',
+        '  ',
+        'Tag B\nnext',
+      ], reason: 'caller list intact');
+      await settle(tester);
+    },
+  );
+
+  testWidgets('long press anchors the menu at the tile center like prime', (
+    tester,
+  ) async {
+    appdata.settings['comicDisplayMode'] = 'detailed';
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: App.rootNavigatorKey,
+        onGenerateRoute: (_) => MaterialPageRoute(
+          builder: (_) => Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 480,
+                height: 200,
+                child: ComicTile(comic: buildComic()),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final tile = tester.getRect(find.byType(ComicTile));
+    await tester.longPress(find.textContaining('Long press details test'));
+    await tester.pumpAndSettle();
+    final menu = tester.getRect(find.byType(PopoverSurface));
+    // venera-prime calls localToGlobal(Offset((width - 242) / 2, height / 2)),
+    // so the menu top-left sits at the tile's horizontal center minus half
+    // the menu width, vertically centered on the tile.
+    expect(
+      menu.topLeft,
+      Offset(tile.left + (tile.width - 242) / 2, tile.top + tile.height / 2),
+    );
+    expect(menu.center.dx, moreOrLessEquals(tile.center.dx));
     await settle(tester);
   });
 }
